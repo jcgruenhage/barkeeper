@@ -594,16 +594,21 @@
       </ul>
     </div>
 
+<!-- Space errors and notices -->
+    <div class="container mt-3 d-print-none space-messages" x-show="$store.barkeeper.space.error || $store.barkeeper.space.notice">
+      <div class="alert alert-danger" role="alert" x-show="$store.barkeeper.space.error">
+        <span x-text="$store.barkeeper.space.error"></span>
+        <button type="button" class="btn-close float-end" @click="$store.barkeeper.space.error = null"></button>
+      </div>
+      <div class="alert alert-success" role="status" x-show="$store.barkeeper.space.notice">
+        <span class="space-notice" x-text="$store.barkeeper.space.notice"></span>
+        <button type="button" class="btn-close float-end" @click="$store.barkeeper.space.notice = null"></button>
+      </div>
+    </div>
+
 <!-- Settings -->
   <template x-if="$store.barkeeper.activeTab === '⚙'">
     <div class="container p-3">
-
-      <div class="container mb-3" x-show="$store.barkeeper.space.error">
-        <div class="alert alert-danger" role="alert">
-          <span x-text="$store.barkeeper.space.error"></span>
-          <button type="button" class="btn-close float-end" @click="$store.barkeeper.space.error = null"></button>
-        </div>
-      </div>
 
       <section class="mb-3">
         <div class="card">
@@ -2882,6 +2887,20 @@
                       Hide ingredient in shopping list. Item will still be considered in calculations!
                     </label>
                   </div>
+                </div>
+                <div class="input-group mb-3" x-data="{ dest_space: '' }" x-show="$store.barkeeper.otherSpaces.length > 0">
+                  <div class="input-group-text">Space:</div>
+                  <select class="form-select copy-ingredient-to-space" x-model="dest_space">
+                    <option value="">choose a space…</option>
+                    <template x-for="space in $store.barkeeper.otherSpaces" :key="space.url">
+                      <option :value="space.url" x-text="space.name"></option>
+                    </template>
+                  </select>
+                  <button
+                    type="button"
+                    class="btn btn-primary"
+                    :disabled="!dest_space || $store.barkeeper.space.busy"
+                    x-on:click="$store.barkeeper.copyIngredientToSpace(ingredient.id, dest_space); dest_space = ''">Copy to space</button>
                 </div>
                 <button
                   type="button"

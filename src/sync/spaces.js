@@ -7,7 +7,7 @@
 import * as A from "@automerge/automerge";
 import { Access } from "@automerge/automerge-repo-keyhive";
 import { initialValue, materialize, applyView } from "./codec.js";
-import { copyCocktailInto } from "./copy.js";
+import { copyCocktailInto, copyIngredientInto } from "./copy.js";
 import { createInviteLink } from "./invite.js";
 import { SpaceSession } from "./session.js";
 import { saveServerConfig } from "./ark.js";
@@ -310,7 +310,8 @@ export class SpacesController {
     await this.persist();
   }
 
-  async copyCocktailTo(cocktailId, targetUrl) {
+  /** Run `copy(source, target, options)` against another space's data. */
+  async copyTo(targetUrl, copy) {
     this.session.flush();
     const source = this.toRaw(this.store.data);
     const handle = await withTimeout(
@@ -320,11 +321,27 @@ export class SpacesController {
     );
     const keyOf = new WeakMap();
     const target = materialize(handle.doc(), keyOf);
-    copyCocktailInto(source, cocktailId, target, {
-      space: this.session.handle.url,
-      heads: this.session.handle.heads(),
-    });
+    const result = copy(source, target);
     handle.change((d) => applyView(d, target, keyOf));
     await this.ark.repo.flush();
+    return { result, spaceName: handle.doc()?.name?.toString() ?? "the other space" };
+  }
+
+  async copyCocktailTo(cocktailId, targetUrl) {
+    const { result, spaceName } = await this.copyTo(targetUrl, (source, target) =>
+      copyCocktailInto(source, cocktailId, target),
+    );
+    return result.copied
+      ? `Copied to ${spaceName}, along with anything its recipe needs.`
+      : `${spaceName} already has this cocktail.`;
+  }
+
+  async copyIngredientTo(ingredientId, targetUrl) {
+    const { result, spaceName } = await this.copyTo(targetUrl, (source, target) =>
+      copyIngredientInto(source, ingredientId, target),
+    );
+    return result.copied
+      ? `Copied to ${spaceName}, along with anything its recipe needs.`
+      : `${spaceName} already has this ingredient.`;
   }
 }

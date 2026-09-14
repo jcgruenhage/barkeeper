@@ -55,6 +55,7 @@ export function createStore(spaces = null) {
       invite: null,
       busy: false,
       error: null,
+      notice: null,
     },
     device: {
       name: '',
@@ -222,6 +223,7 @@ export function createStore(spaces = null) {
     async withBusy(fn) {
       this.space.busy = true;
       this.space.error = null;
+      this.space.notice = null;
       try {
         return await fn();
       } catch (error) {
@@ -296,7 +298,16 @@ export function createStore(spaces = null) {
 
     copyCocktailToSpace(id, url) {
       if (!url) return;
-      this.withBusy(() => spaces.copyCocktailTo(id, url));
+      this.withBusy(async () => {
+        this.space.notice = await spaces.copyCocktailTo(id, url);
+      });
+    },
+
+    copyIngredientToSpace(id, url) {
+      if (!url) return;
+      this.withBusy(async () => {
+        this.space.notice = await spaces.copyIngredientTo(id, url);
+      });
     },
 
     // Events
@@ -545,7 +556,6 @@ export function createStore(spaces = null) {
 
       // A deep copy, so that editing the copy does not change the original.
       const copy = JSON.parse(JSON.stringify(cocktail));
-      delete copy.copiedFrom;
       this.data.cocktails.unshift({
         ...copy,
         id: self.crypto.randomUUID(),

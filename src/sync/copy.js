@@ -1,95 +1,72 @@
 // Copying records from one space into another.
 //
-// Spaces never reference each other: a copy gets new ids and a `copiedFrom`
-// note ({ space, id, heads }) pointing at where it came from. Everything the
-// cocktail needs comes along (ingredients and their sub-recipes, the prep
-// method, the glass), unless the target space already has it, either because
-// it was copied from the same record before, or because it has the same id and
-// name (both spaces came from the same import), or the same name.
-
-function sameName(a, b) {
-  const x = String(a ?? "").trim().toLowerCase();
-  return x !== "" && x === String(b ?? "").trim().toLowerCase();
-}
-
-function findExisting(list, record, space) {
-  return (
-    list.find((t) => t.copiedFrom?.space === space && t.copiedFrom?.id === record.id) ??
-    list.find((t) => t.id === record.id && sameName(t.name, record.name)) ??
-    list.find((t) => sameName(t.name, record.name))
-  );
-}
+// A copy keeps its UUID, so a record is the same record in every space it was
+// copied to, and a target "already has" a record exactly when it has one with
+// that id. Everything a record needs comes along if the target does not have
+// it yet: for a cocktail its ingredients, their sub-recipes, the prep method
+// and the glass; for an ingredient its sub-recipes, recursively. Records the
+// target already has are left as they are.
 
 function clone(value) {
   return JSON.parse(JSON.stringify(value));
 }
 
-/**
- * Copy the cocktail `cocktailId` from `source` (barkeeper data) into `target`
- * (barkeeper data, mutated in place). Returns the id of the new cocktail.
- */
-export function copyCocktailInto(source, cocktailId, target, { space, heads = [] }) {
-  const cocktail = source.cocktails?.find((c) => c.id === cocktailId);
-  if (!cocktail) throw new Error("Cocktail not found");
+function has(list, id) {
+  return (list ?? []).some((record) => record.id === id);
+}
 
+function copyIngredients(source, target, rows) {
+  for (const row of rows ?? []) {
+    if (row.id === undefined || has(target.ingredients, row.id)) continue;
+    const ingredient = source.ingredients?.find((i) => i.id === row.id);
+    if (!ingredient) continue;
+    target.ingredients.unshift(clone(ingredient));
+    copyIngredients(source, target, ingredient.ingredients);
+  }
+}
+
+function copyById(list, targetList, id) {
+  if (id === undefined || id === null || id === "" || has(targetList, id)) return;
+  const record = list?.find((r) => r.id === id);
+  if (record) targetList.push(clone(record));
+}
+
+function prepare(target) {
   target.cocktails ??= [];
   target.ingredients ??= [];
   target.prepMethods ??= [];
   target.glassTypes ??= [];
+}
 
-  const provenance = (id) => ({ space, id, heads: [...heads] });
-  const ingredientIds = new Map();
-
-  const ingredientId = (id) => {
-    if (ingredientIds.has(id)) return ingredientIds.get(id);
-    const ingredient = source.ingredients?.find((i) => i.id === id);
-    if (!ingredient) return id;
-
-    const existing = findExisting(target.ingredients, ingredient, space);
-    if (existing) {
-      ingredientIds.set(id, existing.id);
-      return existing.id;
-    }
-
-    const copy = clone(ingredient);
-    copy.id = crypto.randomUUID();
-    copy.copiedFrom = provenance(ingredient.id);
-    ingredientIds.set(id, copy.id);
-    copy.ingredients = (copy.ingredients ?? []).map((row) => ({
-      ...row,
-      id: row.id === undefined ? undefined : ingredientId(row.id),
-    }));
-    target.ingredients.unshift(copy);
-    return copy.id;
-  };
-
-  const lookupId = (list, targetList, id) => {
-    if (id === undefined || id === null || id === "") return id;
-    const record = list?.find((r) => r.id === id);
-    if (!record) return id;
-    const existing = findExisting(targetList, record, space);
-    if (existing) return existing.id;
-    const copy = clone(record);
-    copy.id = crypto.randomUUID();
-    copy.copiedFrom = provenance(record.id);
-    targetList.push(copy);
-    return copy.id;
-  };
+/**
+ * Copy the cocktail `cocktailId` from `source` (barkeeper data) into `target`
+ * (barkeeper data, mutated in place). Returns whether it was copied, which it
+ * is not if the target already has it.
+ */
+export function copyCocktailInto(source, cocktailId, target) {
+  const cocktail = source.cocktails?.find((c) => c.id === cocktailId);
+  if (!cocktail) throw new Error("Cocktail not found");
+  prepare(target);
+  if (has(target.cocktails, cocktailId)) return { copied: false };
 
   const copy = clone(cocktail);
-  copy.id = crypto.randomUUID();
-  copy.event = "null";
-  copy.copiedFrom = provenance(cocktail.id);
-  const remapRows = (rows) =>
-    (rows ?? []).map((row) => ({
-      ...row,
-      id: row.id === undefined ? undefined : ingredientId(row.id),
-    }));
-  copy.ingredients = remapRows(copy.ingredients);
-  copy.garnishes = remapRows(copy.garnishes);
-  copy.method = lookupId(source.prepMethods, target.prepMethods, cocktail.method);
-  copy.glass = lookupId(source.glassTypes, target.glassTypes, cocktail.glass);
-
+  if (!has(target.events, cocktail.event)) copy.event = "null";
+  copyIngredients(source, target, cocktail.ingredients);
+  copyIngredients(source, target, cocktail.garnishes);
+  copyById(source.prepMethods, target.prepMethods, cocktail.method);
+  copyById(source.glassTypes, target.glassTypes, cocktail.glass);
   target.cocktails.unshift(copy);
-  return copy.id;
+  return { copied: true };
+}
+
+/**
+ * Copy the ingredient `ingredientId` from `source` into `target`, along with
+ * everything its recipe lists, recursively. Returns whether it was copied.
+ */
+export function copyIngredientInto(source, ingredientId, target) {
+  if (!has(source.ingredients, ingredientId)) throw new Error("Ingredient not found");
+  prepare(target);
+  if (has(target.ingredients, ingredientId)) return { copied: false };
+  copyIngredients(source, target, [{ id: ingredientId }]);
+  return { copied: true };
 }

@@ -67,7 +67,7 @@ export const SCHEMA = {
     "settings.costDistRange",
   ],
   // Stored as one value, so concurrent edits never mix two of them.
-  atomic: ["events.*.barProgram.sources.*", "copiedFrom"],
+  atomic: ["events.*.barProgram.sources.*"],
   // Never synced: derived data, and settings that belong to the device.
   local: ["events.*.barProgram.recipes", "settings.darkMode"],
 };
@@ -92,8 +92,6 @@ function compile(schema) {
       }
       if (match) return kind;
     }
-    // "copiedFrom" is atomic wherever it appears.
-    if (path[path.length - 1] === "copiedFrom") return "atomic";
     return null;
   };
 }

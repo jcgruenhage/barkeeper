@@ -366,3 +366,55 @@ test("a space from before fixed prep method ids is upgraded when opened", { time
       !values.includes(0) && !values.includes(1);
   }, "the old prep method ids were not upgraded in the space");
 });
+
+test("an ingredient is copied to another space with its sub-recipes", { timeout: 3 * 60_000 }, async () => {
+  const page = await openClient();
+  const ingredient = (id, name, ingredients = []) => ({
+    id, name, baseUnit: "ml", units: [], ingredients, yield: 0, sources: [], allergens: [],
+    nonVeganIngredients: [], notes: "", safetyFactor: 0.1, abv: 0, color: "#e9ecef", hideInShoppingList: false,
+  });
+  const recipes = {
+    cocktails: [],
+    events: [],
+    ingredients: [
+      ingredient("5b0c7f0e-3f1c-4d63-9b1e-6f6f3c7a0001", "Simple syrup", [
+        { id: "5b0c7f0e-3f1c-4d63-9b1e-6f6f3c7a0002", unit: "ml", amount: 500 },
+        { id: "5b0c7f0e-3f1c-4d63-9b1e-6f6f3c7a0003", unit: "ml", amount: 500 },
+      ]),
+      ingredient("5b0c7f0e-3f1c-4d63-9b1e-6f6f3c7a0002", "Water"),
+      ingredient("5b0c7f0e-3f1c-4d63-9b1e-6f6f3c7a0003", "Sugar"),
+    ],
+  };
+
+  await openTab(page, "settings");
+  const [chooser] = await Promise.all([
+    page.waitForEvent("filechooser"),
+    page.locator("button", { hasText: "import as new space" }).click(),
+  ]);
+  await chooser.setFiles({ name: "Recipes.json", mimeType: "application/json", buffer: Buffer.from(JSON.stringify(recipes)) });
+  await page.waitForEvent("load", { timeout: SYNC_TIMEOUT });
+  await page.waitForSelector("#boot-status", { state: "hidden", timeout: SYNC_TIMEOUT });
+
+  await openTab(page, "Ingredients");
+  await page.locator("input[placeholder='search ingredients...']").fill("Simple");
+  const copy = async () => {
+    await page.locator(".copy-ingredient-to-space").selectOption({ label: "Home bar" });
+    await page.locator("button", { hasText: "Copy to space" }).click();
+    return eventually(async () => {
+      const notice = page.locator(".space-notice");
+      return (await notice.isVisible()) && notice.innerText();
+    }, "no notice after copying");
+  };
+  assert.match(await copy(), /^Copied to Home bar/);
+  assert.match(await copy(), /^Home bar already has this ingredient/);
+
+  await page.locator(".space-switcher button").click();
+  await page.locator(".dropdown-item", { hasText: "Home bar" }).click();
+  await page.waitForEvent("load", { timeout: SYNC_TIMEOUT });
+  await page.waitForSelector("#boot-status", { state: "hidden", timeout: SYNC_TIMEOUT });
+  await openTab(page, "Ingredients");
+  const names = await page
+    .locator("input[x-model='ingredient.name']")
+    .evaluateAll((els) => els.map((e) => e.value).sort());
+  assert.deepEqual(names, ["Simple syrup", "Sugar", "Water"]);
+});
