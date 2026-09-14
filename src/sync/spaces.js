@@ -11,6 +11,7 @@ import { copyCocktailInto } from "./copy.js";
 import { createInviteLink } from "./invite.js";
 import { SpaceSession } from "./session.js";
 import { saveServerConfig } from "./ark.js";
+import { migrateData } from "../migrate.js";
 
 const LIST_KEY = "barkeeper-spaces";
 const ACTIVE_KEY = "barkeeper-active-space";
@@ -110,7 +111,7 @@ export class SpacesController {
       let url;
       if (legacy && !localStorage.getItem(MIGRATED_KEY)) {
         // The old key stays behind as a backup.
-        url = await this.createSpace("Home bar", JSON.parse(legacy));
+        url = await this.createSpace("Home bar", this.withDefaults(JSON.parse(legacy)));
         localStorage.setItem(MIGRATED_KEY, url);
       } else {
         url = await this.createSpace("Home bar");
@@ -295,7 +296,7 @@ export class SpacesController {
     const defaults = this.defaultData();
     const merged = { ...defaults, ...data };
     merged.settings = { ...defaults.settings, ...(data?.settings ?? {}) };
-    return merged;
+    return migrateData(merged);
   }
 
   async importSpace(data, name) {

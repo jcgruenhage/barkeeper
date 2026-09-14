@@ -324,3 +324,45 @@ test("an import can replace the open space", { timeout: 2 * 60_000 }, async () =
   await openTab(page, "settings");
   assert.equal(await page.locator(".list-group-item", { hasText: "open" }).count(), 1);
 });
+
+test("a space from before fixed prep method ids is upgraded when opened", { timeout: 2 * 60_000 }, async () => {
+  const { STIRRED_ID, SHAKEN_ID } = await import("../../src/migrate.js");
+  const page = await openClient();
+  await openTab(page, "Ideas");
+  await newCocktail(page, "Daiquiri");
+  await page.waitForTimeout(1000);
+
+  // Write the old ids straight into the document, as an earlier version would have.
+  await page.evaluate(() => {
+    const { session } = window.barkeeper;
+    session.flush();
+    session.handle.change((d) => {
+      for (const row of Object.values(d.rows)) {
+        const field = String(row.$f ?? "");
+        if (field === '["prepMethods"]') row['["id"]'] = String(row['["name"]']) === "stirred" ? 0 : 1;
+        if (field === '["cocktails"]') row['["method"]'] = 1;
+      }
+    });
+  });
+  const stored = () =>
+    page.evaluate(() =>
+      Object.values(window.barkeeper.session.doc().rows)
+        .filter((row) => ['["prepMethods"]', '["cocktails"]'].includes(String(row.$f)))
+        .map((row) => row['["id"]'] ?? null)
+        .concat(
+          Object.values(window.barkeeper.session.doc().rows)
+            .filter((row) => String(row.$f) === '["cocktails"]')
+            .map((row) => row['["method"]']),
+        ),
+    );
+  assert.ok((await stored()).includes(0));
+
+  await page.evaluate(() => window.barkeeper.spaces.persist());
+  await page.reload();
+  await page.waitForSelector("#boot-status", { state: "hidden", timeout: SYNC_TIMEOUT });
+  await eventually(async () => {
+    const values = await stored();
+    return values.includes(STIRRED_ID) && values.filter((v) => v === SHAKEN_ID).length === 2 &&
+      !values.includes(0) && !values.includes(1);
+  }, "the old prep method ids were not upgraded in the space");
+});

@@ -1,6 +1,7 @@
 import Alpine from "alpinejs";
 import * as d3 from "d3";
 import * as math from "mathjs";
+import { SHAKEN_ID, STIRRED_ID } from "./migrate.js";
 
 const chartCurrencyFormatDE = d3.formatDefaultLocale({
   thousands: '.',
@@ -19,12 +20,12 @@ export function createStore(spaces = null) {
       events: [],
       prepMethods: [
         {
-          id: 0,
+          id: STIRRED_ID,
           name: 'stirred',
           dilutionFormula: '1 + (-1.21 * abv^2 + 1.246 * abv + 0.145)',
         },
         {
-          id: 1,
+          id: SHAKEN_ID,
           name: 'shaken',
           dilutionFormula: '1 + (-1.567 * abv^2 + 1.742 * abv + 0.0203)',
         },

@@ -5,6 +5,7 @@ import { createStore } from "./store.js";
 import { startArk } from "./sync/ark.js";
 import { inviteFromHash, redeemInviteLink } from "./sync/invite.js";
 import { SpacesController } from "./sync/spaces.js";
+import { migrateData } from "./migrate.js";
 
 // Templates use Alpine.raw().
 window.Alpine = Alpine;
@@ -63,6 +64,8 @@ async function boot() {
   const live = Alpine.store("barkeeper");
   session.attach(live.data);
   spaces.bind(live);
+  // After attaching, so that the upgrade is written to the space.
+  migrateData(live.data);
 
   // Debug handles.
   window.barkeeper = { ark, spaces, session };
