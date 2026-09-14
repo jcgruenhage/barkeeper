@@ -9,7 +9,9 @@ const chartCurrencyFormatDE = d3.formatDefaultLocale({
   currency: ['', ' €'],
 });
 
-export function createStore() {
+// `spaces` is the SpacesController of the open space. It is kept out of the
+// returned object so that Alpine does not make the repo and hive reactive.
+export function createStore(spaces = null) {
   return {
     data: {
       cocktails: [],
@@ -38,6 +40,24 @@ export function createStore() {
     },
 
     activeTab: 'null',
+
+    // The open space and this device. Filled in by SpacesController.bind().
+    space: {
+      url: null,
+      name: '',
+      list: [],
+      names: {},
+      members: [],
+      canAdmin: false,
+      selfId: null,
+      server: '',
+      invite: null,
+      busy: false,
+      error: null,
+    },
+    device: {
+      name: '',
+    },
     charts: {},
     barChart: null,
     revenueChart: null,
@@ -164,25 +184,118 @@ export function createStore() {
 
     // Persistence
     export() {
+      const data = JSON.parse(JSON.stringify(this.data));
+      data.events?.forEach((e) => delete e.barProgram?.recipes);
       this.download(
         'data:text/json;charset=utf-8,',
-        encodeURIComponent(JSON.stringify(this.data, null, 2)),
-        'barkeeper.json'
+        encodeURIComponent(JSON.stringify(data, null, 2)),
+        (this.space.name || 'barkeeper') + '.json'
       );
     },
 
-    import() {
+    // Imports a file, either as a new space or replacing everything in the
+    // open one.
+    import(mode = 'new') {
       var fileInput = document.getElementById('import');
+      fileInput.value = '';
       fileInput.click();
 
       fileInput.onchange = () => {
+        const file = fileInput.files.item(0);
         var fr = new FileReader();
-        fr.onload = (e) => { 
-          this.data = JSON.parse(e.target.result);
-          window.location.reload(); // reactivity breaks here, reload fixes it 🤷
+        fr.onload = (e) => {
+          const data = JSON.parse(e.target.result);
+          if (mode === 'replace') {
+            if (!confirm('Replace everything in "' + this.space.name + '" with the contents of ' + file.name + '? This changes the space for every member.')) return;
+            this.withBusy(() => spaces.replaceSpace(data));
+            return;
+          }
+          const name = file.name.replace(/\.json$/i, '') || 'Imported bar';
+          this.withBusy(() => spaces.importSpace(data, name));
         };
-        fr.readAsText(fileInput.files.item(0));
+        fr.readAsText(file);
       };
+    },
+
+    // Spaces
+    async withBusy(fn) {
+      this.space.busy = true;
+      this.space.error = null;
+      try {
+        return await fn();
+      } catch (error) {
+        console.error(error);
+        this.space.error = error?.message ?? String(error);
+      } finally {
+        this.space.busy = false;
+      }
+    },
+
+    get otherSpaces() {
+      return this.space.list.filter((s) => s.url !== this.space.url);
+    },
+
+    memberName(member) {
+      if (member.isSyncServer) return 'Sync server';
+      const name = this.space.names[member.id];
+      if (name) return String(name) + (member.isSelf ? ' (you)' : '');
+      return (member.isSelf ? 'You' : 'Unnamed') + ' · ' + member.id.slice(0, 8);
+    },
+
+    newSpace(name) {
+      if (!name.trim()) return;
+      this.withBusy(() => spaces.newSpace(name.trim()));
+    },
+
+    switchSpace(url) {
+      this.withBusy(() => spaces.switchTo(url));
+    },
+
+    renameSpace(name) {
+      spaces.rename(name);
+    },
+
+    leaveSpace(url) {
+      if (!confirm('Forget this space on this device? Other members keep it, and you can join again with an invite link.')) return;
+      spaces.leave(url);
+    },
+
+    createInvite(level) {
+      this.space.invite = null;
+      this.withBusy(async () => {
+        this.space.invite = await spaces.createInvite(level);
+      });
+    },
+
+    revokeMember(member) {
+      if (!confirm('Remove ' + this.memberName(member) + ' from this space?')) return;
+      this.withBusy(() => spaces.revoke(member.id));
+    },
+
+    setDeviceName(name) {
+      this.device.name = name;
+      spaces.setDeviceName(name);
+    },
+
+    saveServer(endpoint, contactCardJson, peerId) {
+      if (!endpoint.trim() || !contactCardJson.trim() || !peerId.trim()) {
+        this.space.error = 'A custom sync server needs its address, contact card and peer id.';
+        return;
+      }
+      this.withBusy(() => spaces.setServer({
+        endpoint: endpoint.trim(),
+        contactCardJson: contactCardJson.trim(),
+        peerId: peerId.trim(),
+      }));
+    },
+
+    resetServer() {
+      this.withBusy(() => spaces.setServer(null));
+    },
+
+    copyCocktailToSpace(id, url) {
+      if (!url) return;
+      this.withBusy(() => spaces.copyCocktailTo(id, url));
     },
 
     // Events
@@ -429,24 +542,13 @@ export function createStore() {
       const cocktail = this.data.cocktails.find((c) => c.id === id);
       if(!cocktail) { return 0; };
 
+      // A deep copy, so that editing the copy does not change the original.
+      const copy = JSON.parse(JSON.stringify(cocktail));
+      delete copy.copiedFrom;
       this.data.cocktails.unshift({
+        ...copy,
         id: self.crypto.randomUUID(),
-        name: cocktail.name,
-        ingredients: cocktail.ingredients,
-        garnishes: cocktail.garnishes,
-        notes: cocktail.notes,
-        cubes: cocktail.cubes,
-        crushed: cocktail.crushed,
-        largeCubes: cocktail.largeCubes,
-        cubesServing: cocktail.cubesServing,
-        crushedServing: cocktail.crushedServing,
-        largeCubesServing: cocktail.largeCubesServing,
-        method: cocktail.method,
-        glass: cocktail.glass,
         event: event,
-        numToPrep: cocktail.numToPrep,
-        price: cocktail.price,
-        flavorCues: cocktail.flavorCues,
       });
     },
 
@@ -1054,7 +1156,7 @@ export function createStore() {
       [dataset, totals, parts] = this.finances;
 
       const total_revenue  = dataset.reduce((acc, {revenue}) => acc + revenue, 0);
-      const actual_revenue = this.getEvent.barProgram.cocktailsSold.reduce((acc, day) => acc + Object.entries(day).reduce((acc, [id, num]) => acc + num * this.data.cocktails.find((i) => i.id === id).price, 0), 0 );
+      const actual_revenue = this.getEvent.barProgram.cocktailsSold.reduce((acc, day) => acc + Object.entries(day).reduce((acc, [id, num]) => acc + num * (this.data.cocktails.find((i) => i.id === id)?.price ?? 0), 0), 0 );
       const total_expense  = Object.values(totals).reduce((acc, cur) => acc + cur, 0);
       const actual_expense = this.shoppingList.reduce((acc, item) => acc + this.getEvent.barProgram.purchases[item.id].expense, 0 );
       const max = Math.max(total_expense, total_revenue);
@@ -1600,12 +1702,6 @@ export function createStore() {
     },
 
     init() {
-      const stored = localStorage.getItem('barkeeper');
-
-      if (stored) {
-        this.data = JSON.parse(stored);
-      }
-
       // custom directives
       Alpine.directive(
         "destroy",
@@ -1654,10 +1750,11 @@ export function createStore() {
 
       // bruteforce reactivity
       Alpine.effect(() => {
-        // Persist to local storage
-        localStorage.setItem('barkeeper', JSON.stringify(this.data));
+        // Sync to the space document
+        spaces?.session?.touch(JSON.stringify(this.data));
 
-        // update theme
+        // update theme, which belongs to the device rather than the space
+        localStorage.setItem('barkeeper-dark-mode', JSON.stringify(!!this.data.settings.darkMode));
         document.documentElement.setAttribute('data-bs-theme', this.data.settings.darkMode ? 'dark' : 'light');
 
         // Update bar programs

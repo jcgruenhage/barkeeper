@@ -491,10 +491,35 @@
         display: none !important;
       }
     }
+
+    #boot-status {
+      position: fixed;
+      inset: 0;
+      z-index: 2000;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: var(--bs-body-bg);
+      font-size: 1.25rem;
+    }
+
+    #boot-status[hidden] {
+      display: none;
+    }
+
+    #boot-status.boot-error {
+      color: var(--bs-danger);
+    }
+
+    #header h1 .space-switcher {
+      font-size: 1.25rem;
+      vertical-align: middle;
+    }
   </style>
 
 </head>
 <body>
+  <div id="boot-status" class="d-print-none"><span class="boot-message">Starting…</span></div>
   <div id="printarea"></div>
   <div
     x-data="{
@@ -504,7 +529,32 @@
 
 <!-- Navigation -->
     <div id="header" class="d-print-none">
-      <h1>🥃 barkeeper</h1>
+      <h1>
+        🥃 barkeeper
+        <span class="dropdown space-switcher">
+          <button
+            type="button"
+            class="btn btn-outline-secondary dropdown-toggle"
+            data-bs-toggle="dropdown"
+            x-text="$store.barkeeper.space.name || 'Space'"></button>
+          <ul class="dropdown-menu">
+            <template x-for="space in $store.barkeeper.space.list" :key="space.url">
+              <li>
+                <a
+                  class="dropdown-item"
+                  :class="{ 'active': space.url === $store.barkeeper.space.url }"
+                  href="#"
+                  x-text="space.name"
+                  @click.prevent="space.url !== $store.barkeeper.space.url && $store.barkeeper.switchSpace(space.url)"></a>
+              </li>
+            </template>
+            <li><hr class="dropdown-divider"></li>
+            <li>
+              <a class="dropdown-item" href="#" @click.prevent="$store.barkeeper.activeTab = '⚙'">Manage spaces…</a>
+            </li>
+          </ul>
+        </span>
+      </h1>
       <ul class="nav nav-tabs">
         <template x-for="event in $store.barkeeper.data.events.concat(ideaTabStub)" :key="event.id">
           <li
@@ -548,20 +598,159 @@
   <template x-if="$store.barkeeper.activeTab === '⚙'">
     <div class="container p-3">
 
+      <div class="container mb-3" x-show="$store.barkeeper.space.error">
+        <div class="alert alert-danger" role="alert">
+          <span x-text="$store.barkeeper.space.error"></span>
+          <button type="button" class="btn-close float-end" @click="$store.barkeeper.space.error = null"></button>
+        </div>
+      </div>
+
+      <section class="mb-3">
+        <div class="card">
+          <div class="card-header card-title">Space</div>
+          <div class="card-body">
+            <p class="text-body-secondary">
+              A space is one bar crew's data: recipes, ingredients and events. It is end-to-end encrypted and
+              synced through <code x-text="$store.barkeeper.space.server"></code>, which relays it without being able to read it.
+            </p>
+
+            <label class="form-label" for="space-name">Name</label>
+            <input
+              id="space-name"
+              type="text"
+              class="form-control mb-3"
+              :value="$store.barkeeper.space.name"
+              @change="$store.barkeeper.renameSpace($event.target.value)">
+
+            <h6>Members</h6>
+            <ul class="list-group mb-3">
+              <template x-for="member in $store.barkeeper.space.members" :key="member.id">
+                <li class="list-group-item d-flex align-items-center gap-2">
+                  <span class="flex-grow-1" x-text="$store.barkeeper.memberName(member)"></span>
+                  <span class="badge text-bg-secondary" x-text="member.access"></span>
+                  <button
+                    type="button"
+                    class="btn btn-outline-danger btn-sm"
+                    x-show="$store.barkeeper.space.canAdmin && !member.isSelf && !member.isSyncServer"
+                    @click="$store.barkeeper.revokeMember(member)">✗</button>
+                </li>
+              </template>
+            </ul>
+
+            <div x-data="{ level: 'edit' }" x-show="$store.barkeeper.space.canAdmin">
+              <h6>Invite</h6>
+              <div class="input-group mb-2">
+                <select class="form-select" x-model="level" style="max-width: 10rem;">
+                  <option value="read">can view</option>
+                  <option value="edit">can edit</option>
+                  <option value="admin">admin</option>
+                </select>
+                <button
+                  type="button"
+                  class="btn btn-primary"
+                  :disabled="$store.barkeeper.space.busy"
+                  @click="$store.barkeeper.createInvite(level)">Create invite link</button>
+              </div>
+              <template x-if="$store.barkeeper.space.invite">
+                <div class="input-group mb-2">
+                  <input type="text" class="form-control invite-link" readonly :value="$store.barkeeper.space.invite" @focus="$event.target.select()">
+                  <button type="button" class="btn btn-outline-secondary" @click="navigator.clipboard.writeText($store.barkeeper.space.invite)">Copy</button>
+                </div>
+              </template>
+              <p class="text-body-secondary small">
+                Anyone with the link can join, as often as they like, until you remove the invite link from the members above.
+              </p>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="mb-3">
+        <div class="card">
+          <div class="card-header card-title">All spaces on this device</div>
+          <ul class="list-group list-group-flush">
+            <template x-for="space in $store.barkeeper.space.list" :key="space.url">
+              <li class="list-group-item d-flex align-items-center gap-2">
+                <span class="flex-grow-1" x-text="space.name"></span>
+                <span class="badge text-bg-primary" x-show="space.url === $store.barkeeper.space.url">open</span>
+                <button
+                  type="button"
+                  class="btn btn-outline-secondary btn-sm"
+                  x-show="space.url !== $store.barkeeper.space.url"
+                  @click="$store.barkeeper.switchSpace(space.url)">Open</button>
+                <button
+                  type="button"
+                  class="btn btn-outline-danger btn-sm"
+                  @click="$store.barkeeper.leaveSpace(space.url)">Forget</button>
+              </li>
+            </template>
+            <li class="list-group-item" x-data="{ newSpace: '' }">
+              <div class="input-group">
+                <input
+                  type="text"
+                  class="form-control new-space-name"
+                  placeholder="New space, e.g. GPN"
+                  x-model="newSpace"
+                  @keyup.enter="$store.barkeeper.newSpace(newSpace)">
+                <button
+                  type="button"
+                  class="btn btn-outline-success"
+                  :disabled="$store.barkeeper.space.busy"
+                  @click="$store.barkeeper.newSpace(newSpace)">✚</button>
+              </div>
+            </li>
+          </ul>
+        </div>
+      </section>
+
+      <section class="mb-3">
+        <div class="card">
+          <div class="card-header card-title">This device</div>
+          <div class="card-body">
+            <label class="form-label" for="device-name">Your name, as other members see it</label>
+            <input
+              id="device-name"
+              type="text"
+              class="form-control mb-3"
+              :value="$store.barkeeper.device.name"
+              @change="$store.barkeeper.setDeviceName($event.target.value)">
+
+            <details x-data="{ endpoint: '', card: '', peerId: '' }">
+              <summary>Sync server</summary>
+              <p class="mt-2 text-body-secondary small">
+                Every member of a space has to use the same sync server. Changing it reloads barkeeper.
+              </p>
+              <input type="text" class="form-control mb-2" placeholder="wss://sync.example.org" x-model="endpoint">
+              <textarea class="form-control mb-2" rows="3" placeholder="Server contact card (JSON)" x-model="card"></textarea>
+              <input type="text" class="form-control mb-2" placeholder="Server peer id" x-model="peerId">
+              <button type="button" class="btn btn-outline-primary" @click="$store.barkeeper.saveServer(endpoint, card, peerId)">Use this server</button>
+              <button type="button" class="btn btn-outline-secondary" @click="$store.barkeeper.resetServer()">Use the default</button>
+            </details>
+          </div>
+        </div>
+      </section>
+
       <div class="container mb-3">
         <button type="button" class="btn btn-primary" @click="$store.barkeeper.export()">
           <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" class="bi bi-download" viewBox="0 0 16 16">
             <path d="M.5 9.9a.5.5 0 0 1 .5.5v2.5a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-2.5a.5.5 0 0 1 1 0v2.5a2 2 0 0 1-2 2H2a2 2 0 0 1-2-2v-2.5a.5.5 0 0 1 .5-.5"/>
             <path d="M7.646 11.854a.5.5 0 0 0 .708 0l3-3a.5.5 0 0 0-.708-.708L8.5 10.293V1.5a.5.5 0 0 0-1 0v8.793L5.354 8.146a.5.5 0 1 0-.708.708z"/>
           </svg>
-          export bar
+          export space
         </button>
         <button type="button" class="btn btn-primary" @click="$store.barkeeper.import()">
           <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" class="bi bi-file-earmark-arrow-up" viewBox="0 0 16 16">
             <path d="M8.5 11.5a.5.5 0 0 1-1 0V7.707L6.354 8.854a.5.5 0 1 1-.708-.708l2-2a.5.5 0 0 1 .708 0l2 2a.5.5 0 0 1-.708.708L8.5 7.707z"/>
             <path d="M14 14V4.5L9.5 0H4a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2M9.5 3A1.5 1.5 0 0 0 11 4.5h2V14a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V2a1 1 0 0 1 1-1h5.5z"/>
           </svg>
-          import bar
+          import as new space
+        </button>
+        <button type="button" class="btn btn-outline-danger" @click="$store.barkeeper.import('replace')">
+          <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" class="bi bi-file-earmark-arrow-up" viewBox="0 0 16 16">
+            <path d="M8.5 11.5a.5.5 0 0 1-1 0V7.707L6.354 8.854a.5.5 0 1 1-.708-.708l2-2a.5.5 0 0 1 .708 0l2 2a.5.5 0 0 1-.708.708L8.5 7.707z"/>
+            <path d="M14 14V4.5L9.5 0H4a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2M9.5 3A1.5 1.5 0 0 0 11 4.5h2V14a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V2a1 1 0 0 1 1-1h5.5z"/>
+          </svg>
+          import replacing this space
         </button>
         <input type="file" id="import" style="display: none;">
       </div>
@@ -1416,6 +1605,24 @@
                   </div>
 
 
+                </div>
+                <div class="row mt-2" x-data="{ dest_space: '' }" x-show="$store.barkeeper.otherSpaces.length > 0">
+                  <div class="col-12">
+                    <div class="input-group">
+                      <div class="input-group-text">Space:</div>
+                      <select class="form-select copy-to-space" x-model="dest_space">
+                        <option value="">choose a space…</option>
+                        <template x-for="space in $store.barkeeper.otherSpaces" :key="space.url">
+                          <option :value="space.url" x-text="space.name"></option>
+                        </template>
+                      </select>
+                      <button
+                        type="button"
+                        class="btn btn-primary"
+                        :disabled="!dest_space || $store.barkeeper.space.busy"
+                        x-on:click="$store.barkeeper.copyCocktailToSpace(cocktail.id, dest_space); dest_space = ''">Copy to space</button>
+                    </div>
+                  </div>
                 </div>
               </div>
             </div> <!-- /card -->
