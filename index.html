@@ -1355,6 +1355,24 @@
                   </div>
                 </template>
 
+  <!-- Cocktails / Makeable -->
+                <template x-if="$store.barkeeper.barMode">
+                  <div class="mb-3 makeable" x-data="{ get can() { return $store.barkeeper.getMakeable(cocktail.id) } }">
+                    <h5>
+                      Can make:
+                      <span
+                        class="makeable-count"
+                        :class="can.count === 0 ? 'text-danger' : ''"
+                        x-text="can.count === Infinity ? 'as many as you like' : can.count"></span>
+                    </h5>
+                    <div
+                      class="text-body-secondary small makeable-limiting"
+                      x-text="can.count === Infinity
+                        ? 'None of its ingredients are tracked.'
+                        : can.limiting.join(', ') + (can.limiting.length === 1 ? ' runs out first.' : ' run out first.')"></div>
+                  </div>
+                </template>
+
               </div>
 
               <ul class="list-group list-group-flush">
@@ -2522,7 +2540,29 @@
 
       <div class="alert alert-secondary" role="alert">
         Write down what is on the shelf, as a number of bottles (or other sizes) and a loose amount.
-        Ingredients without any stock are not tracked and never run out.
+        Ingredients without any stock are not tracked and never run out. Sub-recipes can have stock too:
+        a batch of syrup is used before its ingredients are.
+      </div>
+
+      <div class="card mb-3">
+        <div class="card-header card-title">What the stock allows</div>
+        <ul class="list-group list-group-flush makeable-list">
+          <template x-for="entry in $store.barkeeper.makeableCocktails" :key="entry.id">
+            <li class="list-group-item d-flex align-items-center gap-2" :data-cocktail="entry.id">
+              <span class="flex-grow-1" x-text="entry.name"></span>
+              <span class="badge text-bg-primary" x-show="entry.onMenu">on the menu</span>
+              <span
+                class="text-body-secondary small"
+                x-show="entry.count !== Infinity"
+                x-text="entry.limiting.join(', ') + (entry.limiting.length === 1 ? ' runs out first' : ' run out first')"></span>
+              <span
+                class="fw-bold text-end makeable-count"
+                style="min-width: 3rem;"
+                :class="entry.count === 0 ? 'text-danger' : ''"
+                x-text="entry.count === Infinity ? '∞' : entry.count"></span>
+            </li>
+          </template>
+        </ul>
       </div>
 
       <input

@@ -223,3 +223,26 @@ test("stock is counted in sizes plus a loose amount", { timeout: 5 * 60_000 }, a
   assert.equal(await gin.locator(".stock-par").inputValue(), "2000");
   assert.deepEqual(page.errors, []);
 });
+
+test("the stock decides how many of each cocktail can be made", { timeout: 5 * 60_000 }, async () => {
+  const data = barMode(homeBar());
+  data.bar = {
+    cocktails: { "last-word": { onMenu: true } },
+    stock: { gin: { counts: { "gin-700": 1 } }, chartreuse: { loose: 180 } },
+    par: {},
+  };
+  const page = await openBar(data);
+  await openTab(page, "Stock");
+  const row = (id) => page.locator(`.makeable-list [data-cocktail='${id}']`);
+  await eventually(() => row("last-word").innerText(), (text) => /on the menu/.test(text) && /Green Chartreuse runs out first\s+8$/.test(text));
+  await eventually(() => row("closing-argument").locator(".makeable-count").innerText(), "8");
+
+  await setInput(page.locator(".stock-item[data-ingredient='mezcal'] .stock-loose"), 45);
+  await eventually(() => row("closing-argument").innerText(), (text) => /Mezcal runs out first\s+2$/.test(text));
+
+  await openTab(page, "Menu");
+  const lastWord = await card(page, "Last Word");
+  assert.equal(await lastWord.locator(".makeable-count").innerText(), "8");
+  assert.equal(await lastWord.locator(".makeable-limiting").innerText(), "Green Chartreuse runs out first.");
+  assert.deepEqual(page.errors, []);
+});

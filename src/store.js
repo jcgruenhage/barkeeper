@@ -3,7 +3,8 @@ import * as d3 from "d3";
 import * as math from "mathjs";
 import { SHAKEN_ID, STIRRED_ID } from "./migrate.js";
 import { cheapestOption, purchaseOptions, unitPrice } from "./sizes.js";
-import { foldSizeIntoLoose, stockAmount } from "./bar.js";
+import { foldSizeIntoLoose, makeable, stockAmount } from "./bar.js";
+import { conversionFactor, ingredientUnits, standardUnits } from "./units.js";
 
 const chartCurrencyFormatDE = d3.formatDefaultLocale({
   thousands: '.',
@@ -409,6 +410,26 @@ export function createStore(spaces = null) {
       else this.data.bar.par[id] = Number(value);
     },
 
+    // How many serves of a cocktail the stock allows, and the names of the
+    // ingredients that run out first. The count is Infinity if nothing it
+    // needs is tracked.
+    getMakeable(id) {
+      const cocktail = this.data.cocktails.find((c) => c.id === id);
+      if (!cocktail) { return { count: Infinity, limiting: [] }; };
+      const result = makeable(this.data, cocktail);
+      return {
+        count: result.count,
+        limiting: result.limiting.map((i) => this.getIngredient(i)?.name ?? i),
+      };
+    },
+
+    // Every cocktail, the ones on the menu first, with what the stock allows.
+    get makeableCocktails() {
+      return this.data.cocktails
+        .map((c) => ({ id: c.id, name: c.name, onMenu: this.isOnMenu(c.id), ...this.getMakeable(c.id) }))
+        .toSorted((a, b) => (b.onMenu - a.onMenu) || a.name.localeCompare(b.name));
+    },
+
     // Ingredients for the stock list, by name.
     stockIngredients(searchString) {
       return this.searchIngredient(searchString).toSorted((a, b) => a.name.localeCompare(b.name));
@@ -626,31 +647,13 @@ export function createStore(spaces = null) {
 
     // return all global conversions from the global table that match
     getIngredientStandardUnits(id) {
-      const i = this.getIngredient(id);
-      let units = [];
-
-      this.data.settings.unitConvTable.forEach((entry) => {
-        if (entry[0] === i.baseUnit) { units.push([entry[1], 1/entry[2]]) };
-        if (entry[1] === i.baseUnit) { units.push([entry[0], entry[2]]) };
-      });
-
-      return units;
+      return standardUnits(this.getIngredient(id), this.data.settings.unitConvTable);
     },
 
     // return a full (standard and ingredient specific) units with conversion factors
     // if flag is set, don't deduplicate entries (usefull for finding out if an entry in the ingredient specific unit conversion table is valid)
     getIngredientUnits(id, dedupe = true) {
-      const i = this.getIngredient(id);
-      const standardUnits = this.getIngredientStandardUnits(id);
-
-      // build array
-      let units = [...i.units, ...standardUnits];
-
-      if (dedupe) {
-        return [ ...new Map(units) ];
-      } else {
-        return units;
-      };
+      return ingredientUnits(this.getIngredient(id), this.data.settings.unitConvTable, dedupe);
     },
 
     getIngredient(id) {
@@ -914,19 +917,11 @@ export function createStore(spaces = null) {
       ingredient = JSON.parse(JSON.stringify(this.getIngredient(recipe_entry.id)));
 
       // convert amount to base unit and apply safety factor
-      let conversionFactor = 1.0;
+      const factor         = conversionFactor(ingredient, recipe_entry.unit, this.data.settings.unitConvTable);
       let safetyFactor     = ingredient.safetyFactor;
 
-      if (recipe_entry.unit !== ingredient.baseUnit) {
-        const units = this.getIngredientUnits(ingredient.id);
-        const unitConvTableEntry = units.find((e) => e[0] === recipe_entry.unit);
-        if(unitConvTableEntry) {
-          conversionFactor = unitConvTableEntry[1];
-        }
-      };
-
       recipe_entry.color      = ingredient.color;
-      recipe_entry.amount     = recipe_entry.amount * conversionFactor * (1 + +safetyFactor);
+      recipe_entry.amount     = recipe_entry.amount * factor * (1 + +safetyFactor);
       recipe_entry.unit       = ingredient.baseUnit;
       recipe_entry.name       = ingredient.name;
       recipe_entry.notes      = ingredient.notes;
