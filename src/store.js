@@ -2,6 +2,7 @@ import Alpine from "alpinejs";
 import * as d3 from "d3";
 import * as math from "mathjs";
 import { SHAKEN_ID, STIRRED_ID } from "./migrate.js";
+import { cheapestOption, purchaseOptions } from "./sizes.js";
 
 const chartCurrencyFormatDE = d3.formatDefaultLocale({
   thousands: '.',
@@ -448,7 +449,7 @@ export function createStore(spaces = null) {
         units: [],
         ingredients: [],
         yield: 0,
-        sources: [],
+        sizes: [],
         allergens: [],
         nonVeganIngredients: [],
         notes: '',
@@ -471,6 +472,31 @@ export function createStore(spaces = null) {
       this.data.cocktails.forEach((e) => {
         e.ingredients = e.ingredients.filter((i) => i.id !== id);
       });
+    },
+
+    // Sizes and their sources
+    addSize(ingredient) {
+      ingredient.sizes.push({
+        id: self.crypto.randomUUID(),
+        size: 0,
+        sources: [],
+      });
+    },
+
+    removeSize(ingredient, sizeId) {
+      ingredient.sizes = ingredient.sizes.filter((s) => s.id !== sizeId);
+    },
+
+    addSource(size) {
+      size.sources.push({
+        id: self.crypto.randomUUID(),
+        price: 0,
+        shopLink: '',
+      });
+    },
+
+    getPurchaseOptions(id) {
+      return purchaseOptions(this.getIngredient(id));
     },
 
     searchIngredient(searchString, excludeIdsArray = []) {
@@ -851,9 +877,8 @@ export function createStore(spaces = null) {
           const _ingredient = this.getIngredient(ingredient.id);
           if (!_ingredient) { return; };
 
-          const sources = _ingredient.sources;
           const costPerSource = [];
-          sources.forEach((source) => {
+          purchaseOptions(_ingredient).forEach((source) => {
             costPerSource.push(Math.ceil((ingredient.amount*n)/source.size)*source.price);
           });
           costSum += Math.min(...costPerSource);
@@ -1634,18 +1659,10 @@ export function createStore(spaces = null) {
         const i = this.getIngredient(ingredient.id);
         if (i === undefined) { return };
 
-        // look for event specific source, if there is none, find the cheapest
-        let source = {};
-        if (barProgram.sources.hasOwnProperty(i.id)) {
-          source = JSON.parse(JSON.stringify(barProgram.sources[i.id]));
-        } else {
-          const calcCost = s => Math.ceil((ingredient.amount)/s.size)*s.price;
-          source = i.sources.reduce((cheapest, current) => 
-            calcCost(current) < calcCost(cheapest) ? current : cheapest
-          );
-
-          barProgram.sources[i.id] = JSON.parse(JSON.stringify(source));
-        };  
+        // use the source picked for this event, if there is none, the cheapest
+        const source = barProgram.sources.hasOwnProperty(i.id)
+          ? barProgram.sources[i.id]
+          : cheapestOption(i, ingredient.amount) ?? {};
 
         ingredients.id      = i.id;
         ingredient.comment  = i.notes;

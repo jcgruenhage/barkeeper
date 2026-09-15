@@ -8,6 +8,7 @@ import {
   materialize,
   reconcile,
 } from "../src/sync/codec.js";
+import { migrateData } from "../src/migrate.js";
 
 function sample() {
   return {
@@ -40,7 +41,17 @@ function sample() {
         units: [["bottle", 700]],
         ingredients: [],
         yield: 0,
-        sources: [{ size: 700, price: 18.99, shopLink: "https://example.org" }],
+        sizes: [
+          {
+            id: "s700",
+            size: 700,
+            sources: [
+              { id: "shop1", price: 18.99, shopLink: "https://example.org" },
+              { id: "shop2", price: 21.5, shopLink: "" },
+            ],
+          },
+          { id: "s1000", size: 1000, sources: [] },
+        ],
         allergens: [],
         nonVeganIngredients: [],
         notes: "",
@@ -170,6 +181,45 @@ test("concurrently added rows are both kept", () => {
   sync(a, b);
   const ids = a.view.cocktails[0].garnishes.map((g) => g.id).sort();
   assert.deepEqual(ids, ["cherry", "orange", "peel"]);
+  assert.deepEqual(a.view, b.view);
+});
+
+test("sources nested in sizes merge like any other rows", () => {
+  const [a, b] = pair();
+  a.edit((v) => v.ingredients[0].sizes[0].sources.push({ id: "shop3", price: 17, shopLink: "c" }));
+  b.edit((v) => {
+    v.ingredients[0].sizes[0].size = 750;
+    v.ingredients[0].sizes[0].sources[0].price = 19.49;
+  });
+  sync(a, b);
+  const [size] = a.view.ingredients[0].sizes;
+  assert.equal(size.size, 750);
+  assert.deepEqual(size.sources.map((s) => [s.id, s.price]), [["shop1", 19.49], ["shop2", 21.5], ["shop3", 17]]);
+  assert.deepEqual(a.view, b.view);
+});
+
+test("sizes migrated by two devices at once are merged on the next migration", () => {
+  const legacy = sample();
+  legacy.ingredients[0].sources = [
+    { size: 700, price: 18.99, shopLink: "https://example.org" },
+    { size: 700, price: 21.5, shopLink: "" },
+    { size: 1000, price: 25, shopLink: "" },
+  ];
+  delete legacy.ingredients[0].sizes;
+  const doc = createDoc(legacy, "GPN");
+  const a = new Peer(A.clone(doc));
+  const b = new Peer(A.clone(doc));
+  a.edit((v) => migrateData(v));
+  b.edit((v) => migrateData(v));
+  sync(a, b);
+  assert.equal(a.view.ingredients[0].sizes.length, 4);
+  assert.equal(a.view.ingredients[0].sources, undefined);
+
+  a.edit((v) => migrateData(v));
+  sync(a, b);
+  const sizes = b.view.ingredients[0].sizes;
+  assert.deepEqual(sizes.map((s) => s.size), [700, 1000]);
+  assert.deepEqual(sizes[0].sources.map((s) => s.price), [18.99, 21.5]);
   assert.deepEqual(a.view, b.view);
 });
 

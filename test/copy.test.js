@@ -21,7 +21,7 @@ function home() {
       },
     ],
     ingredients: [
-      { id: "gin", name: "Gin", ingredients: [], sources: [{ size: 700, price: 19, shopLink: "" }] },
+      { id: "gin", name: "Gin", ingredients: [], sizes: [{ id: "s700", size: 700, sources: [{ id: "shop", price: 19, shopLink: "" }] }] },
       {
         id: "syrup",
         name: "Simple syrup",

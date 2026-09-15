@@ -48,6 +48,9 @@ export const SCHEMA = {
     "ingredients",
     "ingredients.*.ingredients",
     "ingredients.*.units",
+    "ingredients.*.sizes",
+    "ingredients.*.sizes.*.sources",
+    // Before sizes: the flat sources of spaces that were not migrated yet.
     "ingredients.*.sources",
     "events",
     "events.*.barProgram.equipment",
