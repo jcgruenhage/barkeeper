@@ -3,6 +3,7 @@ import * as d3 from "d3";
 import * as math from "mathjs";
 import { SHAKEN_ID, STIRRED_ID } from "./migrate.js";
 import { cheapestOption, purchaseOptions, unitPrice } from "./sizes.js";
+import { foldSizeIntoLoose, stockAmount } from "./bar.js";
 
 const chartCurrencyFormatDE = d3.formatDefaultLocale({
   thousands: '.',
@@ -36,6 +37,8 @@ export function createStore(spaces = null) {
       // ingredients. Only used in bar mode.
       bar: {
         cocktails: {},
+        stock: {},
+        par: {},
       },
       settings: {
         // 'popup' plans events, 'bar' runs a permanent bar with a menu.
@@ -358,6 +361,59 @@ export function createStore(spaces = null) {
       this.editBarEntry('cocktails', id).onMenu = onMenu;
     },
 
+    // Stock, in the base unit of each ingredient. Undefined if not tracked.
+    getStock(id) {
+      return stockAmount(this.getIngredient(id), this.barEntry('stock', id));
+    },
+
+    isStockTracked(id) {
+      return this.barEntry('stock', id) !== undefined;
+    },
+
+    getStockCount(id, sizeId) {
+      return this.barEntry('stock', id)?.counts?.[sizeId];
+    },
+
+    // `value` comes from an input: an empty string clears the value, but does
+    // not start tracking an ingredient that is not tracked yet.
+    setStockCount(id, sizeId, value) {
+      const clear = value === '' || !Number.isFinite(Number(value));
+      if (clear && !this.isStockTracked(id)) return;
+      const entry = this.editBarEntry('stock', id);
+      entry.counts ??= {};
+      if (clear) delete entry.counts[sizeId];
+      else entry.counts[sizeId] = Number(value);
+    },
+
+    setStockLoose(id, value) {
+      const clear = value === '' || !Number.isFinite(Number(value));
+      if (clear && !this.isStockTracked(id)) return;
+      const entry = this.editBarEntry('stock', id);
+      if (clear) delete entry.loose;
+      else entry.loose = Number(value);
+    },
+
+    stopTrackingStock(id) {
+      if (this.data.bar?.stock) delete this.data.bar.stock[id];
+    },
+
+    // The minimum stock of an ingredient, in its base unit.
+    getPar(id) {
+      return this.data.bar?.par?.[id];
+    },
+
+    setPar(id, value) {
+      this.data.bar ??= {};
+      this.data.bar.par ??= {};
+      if (value === '' || !Number.isFinite(Number(value))) delete this.data.bar.par[id];
+      else this.data.bar.par[id] = Number(value);
+    },
+
+    // Ingredients for the stock list, by name.
+    stockIngredients(searchString) {
+      return this.searchIngredient(searchString).toSorted((a, b) => a.name.localeCompare(b.name));
+    },
+
     // Events
     addEvent(name) {
       this.data.events.push({
@@ -509,6 +565,8 @@ export function createStore(spaces = null) {
 
     removeIngredient(id) {
       this.data.ingredients = this.data.ingredients.filter((e) => e.id !== id);
+      if (this.data.bar?.stock) delete this.data.bar.stock[id];
+      if (this.data.bar?.par) delete this.data.bar.par[id];
 
       // remove refs from ingredients that have recipes
       this.data.ingredients.forEach((e) => {
@@ -531,6 +589,9 @@ export function createStore(spaces = null) {
     },
 
     removeSize(ingredient, sizeId) {
+      const size = ingredient.sizes.find((s) => s.id === sizeId);
+      const stock = this.barEntry('stock', ingredient.id);
+      if (size && stock) foldSizeIntoLoose(stock, size);
       ingredient.sizes = ingredient.sizes.filter((s) => s.id !== sizeId);
     },
 

@@ -123,7 +123,7 @@ test("drinks go on and off the menu of a permanent bar", { timeout: 5 * 60_000 }
 
   await openTab(page, "settings");
   await page.locator("#bar-mode-bar").check();
-  assert.deepEqual(await tabNames(page), ["Menu", "Repertoire", "Ingredients"]);
+  assert.deepEqual(await tabNames(page), ["Menu", "Repertoire", "Stock", "Ingredients"]);
 
   await openTab(page, "Repertoire");
   assert.deepEqual((await cocktailNames(page)).sort(), ["Closing Argument", "Last Word"]);
@@ -159,5 +159,67 @@ test("drinks go on and off the menu of a permanent bar", { timeout: 5 * 60_000 }
   await openTab(page, "settings");
   await page.locator("#bar-mode-popup").check();
   assert.deepEqual(await tabNames(page), ["Ideas", "Ingredients"]);
+  assert.deepEqual(page.errors, []);
+});
+
+function barMode(data) {
+  data.settings.mode = "bar";
+  return data;
+}
+
+async function setInput(locator, value) {
+  await locator.fill(String(value));
+  await locator.dispatchEvent("change");
+}
+
+// Alpine renders after a microtask, so read until the value settles.
+async function eventually(read, expected, timeout = 5_000) {
+  const deadline = Date.now() + timeout;
+  let actual;
+  while (Date.now() < deadline) {
+    actual = await read();
+    if (typeof expected === "function" ? expected(actual) : actual === expected) return;
+    await new Promise((r) => setTimeout(r, 50));
+  }
+  assert.fail(`expected ${expected}, got ${actual}`);
+}
+
+test("stock is counted in sizes plus a loose amount", { timeout: 5 * 60_000 }, async () => {
+  const page = await openBar(barMode(homeBar()));
+  await openTab(page, "Stock");
+  const gin = page.locator(".stock-item[data-ingredient='gin']");
+  const untracked = () => gin.locator(".badge", { hasText: "not tracked" }).isVisible();
+  const total = () => gin.locator(".stock-total").innerText();
+  const warns = async () => /text-danger/.test(await gin.locator(".stock-total").getAttribute("class"));
+  await eventually(untracked, true);
+  // Clearing an empty field does not start tracking.
+  await setInput(gin.locator(".stock-loose"), "");
+  await eventually(untracked, true);
+
+  await setInput(gin.locator(".stock-count[data-size='700']"), 2.5);
+  await eventually(untracked, false);
+  await eventually(total, "1.750,00 ml");
+  await setInput(gin.locator(".stock-loose"), 100);
+  await eventually(total, "1.850,00 ml");
+
+  await setInput(gin.locator(".stock-par"), 2000);
+  await eventually(warns, true);
+  await setInput(gin.locator(".stock-count[data-size='1000']"), 1);
+  await eventually(total, "2.850,00 ml");
+  await eventually(warns, false);
+
+  // Removing a size keeps its bottles as loose stock.
+  await openTab(page, "Ingredients");
+  const ginCard = page.locator(".card:has(input[x-model='ingredient.name'])").filter({ has: page.locator("#sizes-gin") });
+  await ginCard.locator(".ingredient-size").first().locator("button", { hasText: "✗" }).first().click();
+  await openTab(page, "Stock");
+  await eventually(() => gin.locator(".stock-count").count(), 1);
+  await eventually(() => gin.locator(".stock-loose").inputValue(), "1850");
+  await eventually(total, "2.850,00 ml");
+
+  await gin.locator(".stop-tracking").click();
+  await eventually(untracked, true);
+  // The minimum stays.
+  assert.equal(await gin.locator(".stock-par").inputValue(), "2000");
   assert.deepEqual(page.errors, []);
 });

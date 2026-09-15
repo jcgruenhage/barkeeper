@@ -566,7 +566,7 @@
               x-text="event.name"></a>
           </li>
         </template>
-        <template x-for="tab in ($store.barkeeper.barMode ? ['Menu', 'Repertoire', 'Ingredients'] : ['Ingredients'])" :key="tab">
+        <template x-for="tab in ($store.barkeeper.barMode ? ['Menu', 'Repertoire', 'Stock', 'Ingredients'] : ['Ingredients'])" :key="tab">
           <li
             @click="$store.barkeeper.activeTab = tab"
             class="nav-item">
@@ -2512,6 +2512,93 @@
 
         </div>
       </div>
+
+    </div>
+  </template>
+
+<!-- Stock -->
+  <template x-if="$store.barkeeper.barMode && $store.barkeeper.activeTab === 'Stock'">
+    <div class="container p-3" x-data="{ searchStock: '' }">
+
+      <div class="alert alert-secondary" role="alert">
+        Write down what is on the shelf, as a number of bottles (or other sizes) and a loose amount.
+        Ingredients without any stock are not tracked and never run out.
+      </div>
+
+      <input
+        type="text"
+        class="form-control"
+        placeholder="search ingredients..."
+        x-model="searchStock">
+
+      <ul class="list-group mt-3 stock-list">
+        <template x-for="ingredient in $store.barkeeper.stockIngredients(searchStock)" :key="ingredient.id">
+          <li
+            class="list-group-item stock-item"
+            :data-ingredient="ingredient.id"
+            x-data="{
+              get tracked() { return $store.barkeeper.isStockTracked(ingredient.id) },
+              get stock() { return $store.barkeeper.getStock(ingredient.id) },
+              get par() { return $store.barkeeper.getPar(ingredient.id) },
+            }">
+            <div class="d-flex align-items-center gap-2 mb-2">
+              <div class="pill" :style="'background-color: ' + ingredient.color + ';'"></div>
+              <span class="fs-5 flex-grow-1" x-text="ingredient.name"></span>
+              <span class="badge text-bg-secondary" x-show="!tracked">not tracked</span>
+              <span
+                class="stock-total"
+                x-show="tracked"
+                :class="par !== undefined && stock < par ? 'text-danger fw-bold' : ''"
+                x-text="$formatNumber(stock ?? 0) + ' ' + ingredient.baseUnit"></span>
+              <button
+                type="button"
+                class="btn btn-outline-danger btn-sm stop-tracking"
+                title="Stop tracking the stock of this ingredient"
+                x-show="tracked"
+                @click="$store.barkeeper.stopTrackingStock(ingredient.id)">✗</button>
+            </div>
+            <div class="d-flex flex-wrap gap-2">
+              <template x-for="size in ingredient.sizes" :key="size.id">
+                <div class="input-group" style="width: 15rem;">
+                  <input
+                    type="number"
+                    step="0.1"
+                    min="0"
+                    class="form-control text-end stock-count"
+                    :data-size="size.size"
+                    placeholder="–"
+                    :value="$store.barkeeper.getStockCount(ingredient.id, size.id) ?? ''"
+                    @change="$store.barkeeper.setStockCount(ingredient.id, size.id, $event.target.value)">
+                  <span class="input-group-text" x-text="'× ' + size.size + ' ' + ingredient.baseUnit"></span>
+                </div>
+              </template>
+              <div class="input-group" style="width: 15rem;">
+                <input
+                  type="number"
+                  step="1"
+                  min="0"
+                  class="form-control text-end stock-loose"
+                  placeholder="–"
+                  :value="$store.barkeeper.barEntry('stock', ingredient.id)?.loose ?? ''"
+                  @change="$store.barkeeper.setStockLoose(ingredient.id, $event.target.value)">
+                <span class="input-group-text" x-text="ingredient.baseUnit + (ingredient.sizes.length > 0 ? ' loose' : '')"></span>
+              </div>
+              <div class="input-group ms-auto" style="width: 17rem;">
+                <span class="input-group-text">minimum</span>
+                <input
+                  type="number"
+                  step="1"
+                  min="0"
+                  class="form-control text-end stock-par"
+                  placeholder="–"
+                  :value="par ?? ''"
+                  @change="$store.barkeeper.setPar(ingredient.id, $event.target.value)">
+                <span class="input-group-text" x-text="ingredient.baseUnit"></span>
+              </div>
+            </div>
+          </li>
+        </template>
+      </ul>
 
     </div>
   </template>
