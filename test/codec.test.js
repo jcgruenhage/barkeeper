@@ -223,6 +223,24 @@ test("sizes migrated by two devices at once are merged on the next migration", (
   assert.deepEqual(a.view, b.view);
 });
 
+test("bar state keyed by id merges per entry and per field", () => {
+  const [a, b] = pair();
+  a.edit((v) => {
+    v.settings.mode = "bar";
+    v.bar = { cocktails: { c1: { onMenu: true } } };
+  });
+  sync(a, b);
+  a.edit((v) => (v.bar.cocktails.c1.onMenu = false));
+  b.edit((v) => (v.bar.cocktails.c2 = { onMenu: true }));
+  sync(a, b);
+  assert.deepEqual(a.view.bar, { cocktails: { c1: { onMenu: false }, c2: { onMenu: true } } });
+  assert.equal(b.view.settings.mode, "bar");
+  assert.deepEqual(a.view, b.view);
+  a.edit((v) => delete v.bar.cocktails.c2);
+  sync(a, b);
+  assert.deepEqual(Object.keys(b.view.bar.cocktails), ["c1"]);
+});
+
 test("a row added before the view saw a remote change is not deleted", () => {
   const [a, b] = pair();
   b.edit((v) => v.glassTypes.push({ id: "g2", name: "Coupe", volume: 180 }));

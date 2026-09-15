@@ -28,3 +28,17 @@ export function cheapestOption(ingredient, amount) {
   }
   return best;
 }
+
+/**
+ * The lowest price of one base unit (a ml, a piece) of an ingredient, over all
+ * its sizes and sources. Undefined if the ingredient cannot be bought.
+ */
+export function unitPrice(ingredient) {
+  let best;
+  for (const option of purchaseOptions(ingredient)) {
+    if (!(option.size > 0)) continue;
+    const price = option.price / option.size;
+    if (best === undefined || price < best) best = price;
+  }
+  return best;
+}

@@ -523,7 +523,6 @@
   <div id="printarea"></div>
   <div
     x-data="{
-      tabs: ['Ingredients',],
       ideaTabStub: [{id: 'null', name: 'Ideas'}],
     }">
 
@@ -556,7 +555,7 @@
         </span>
       </h1>
       <ul class="nav nav-tabs">
-        <template x-for="event in $store.barkeeper.data.events.concat(ideaTabStub)" :key="event.id">
+        <template x-for="event in ($store.barkeeper.barMode ? [] : $store.barkeeper.data.events.concat(ideaTabStub))" :key="event.id">
           <li
             @click="$store.barkeeper.activeTab = event.id"
             class="nav-item">
@@ -567,7 +566,7 @@
               x-text="event.name"></a>
           </li>
         </template>
-        <template x-for="tab in tabs">
+        <template x-for="tab in ($store.barkeeper.barMode ? ['Menu', 'Repertoire', 'Ingredients'] : ['Ingredients'])" :key="tab">
           <li
             @click="$store.barkeeper.activeTab = tab"
             class="nav-item">
@@ -773,6 +772,43 @@
         <div>
           <div class="card">
             <div class="card-header card-title">
+              Kind of bar
+            </div>
+            <div class="card-body">
+              <div class="form-check">
+                <input
+                  class="form-check-input"
+                  type="radio"
+                  name="bar-mode"
+                  id="bar-mode-popup"
+                  :checked="!$store.barkeeper.barMode"
+                  @change="$store.barkeeper.setMode('popup')">
+                <label class="form-check-label" for="bar-mode-popup">
+                  Popup bar: plan events, with a program of cocktails, ice, equipment and a shopping list for each
+                </label>
+              </div>
+              <div class="form-check">
+                <input
+                  class="form-check-input"
+                  type="radio"
+                  name="bar-mode"
+                  id="bar-mode-bar"
+                  :checked="$store.barkeeper.barMode"
+                  @change="$store.barkeeper.setMode('bar')">
+                <label class="form-check-label" for="bar-mode-bar">
+                  Permanent bar: a menu that drinks go on and off, and the stock on hand
+                </label>
+              </div>
+              <p class="text-body-secondary small mt-2 mb-0">
+                Switching does not delete anything. Events stay in the space and come back when you switch back.
+              </p>
+            </div>
+          </div>
+        </div>
+
+        <div x-show="!$store.barkeeper.barMode">
+          <div class="card">
+            <div class="card-header card-title">
               Events
             </div>
             <div class="alert alert-warning m-3" role="alert">
@@ -903,7 +939,7 @@
           </div>
         </div>
 
-        <div>
+        <div x-show="!$store.barkeeper.barMode">
           <div class="card">
             <div class="card-header card-title">
               Cost distribution
@@ -1045,7 +1081,7 @@
   </template>
 
 <!-- Cocktails -->
-  <template x-if="$store.barkeeper.data.events.concat(ideaTabStub).some((e) => e.id === $store.barkeeper.activeTab)"> <!-- template / cocktails -->
+  <template x-if="$store.barkeeper.isCocktailTab"> <!-- template / cocktails -->
     
     <div class="container p-3" x-data="{searchCocktails: ''}" style="break-after: page;">
 
@@ -1293,13 +1329,31 @@
                 </div>
 
   <!-- Cocktails / Cost Distribution -->
-                <h5>Cost distribution</h5>
-                <div
-                  class="costDistChart mb-3"
-                  style="width: 100%; height: 350px;"
-                  x-on:resize.window.debounce="$store.barkeeper.createCocktailCostChart($el, $store.barkeeper.calcCocktailCost(cocktail.id))"
-                  x-render="() => { $store.barkeeper.createCocktailCostChart($el, $store.barkeeper.calcCocktailCost(cocktail.id)); $store.barkeeper.charts[cocktail.id] = $el; }"
-                  x-destroy="() => { delete $store.barkeeper.charts[cocktail.id] }"></div>
+                <template x-if="!$store.barkeeper.barMode">
+                  <div>
+                    <h5>Cost distribution</h5>
+                    <div
+                      class="costDistChart mb-3"
+                      style="width: 100%; height: 350px;"
+                      x-on:resize.window.debounce="$store.barkeeper.createCocktailCostChart($el, $store.barkeeper.calcCocktailCost(cocktail.id))"
+                      x-render="() => { $store.barkeeper.createCocktailCostChart($el, $store.barkeeper.calcCocktailCost(cocktail.id)); $store.barkeeper.charts[cocktail.id] = $el; }"
+                      x-destroy="() => { delete $store.barkeeper.charts[cocktail.id] }"></div>
+                  </div>
+                </template>
+
+  <!-- Cocktails / Cost per serve -->
+                <template x-if="$store.barkeeper.barMode">
+                  <div class="mb-3 serve-cost" x-data="{ get serve() { return $store.barkeeper.calcServeCost(cocktail.id) } }">
+                    <h5>
+                      Cost per serve:
+                      <span x-text="$formatCurrency(serve.cost)"></span>
+                    </h5>
+                    <div
+                      class="text-body-secondary small"
+                      x-show="serve.unpriced.length > 0"
+                      x-text="'Without a price: ' + serve.unpriced.join(', ')"></div>
+                  </div>
+                </template>
 
               </div>
 
@@ -1549,7 +1603,18 @@
                 </ul>   
 
               <div class="card-footer" x-data="{ dest_event: 'null' }">
-                <div class="row">
+                <template x-if="$store.barkeeper.barMode">
+                  <div class="form-check form-switch mb-2">
+                    <input
+                      class="form-check-input on-menu"
+                      type="checkbox"
+                      :id="'on-menu-' + cocktail.id"
+                      :checked="$store.barkeeper.isOnMenu(cocktail.id)"
+                      @change="$store.barkeeper.setOnMenu(cocktail.id, $event.target.checked)">
+                    <label class="form-check-label" :for="'on-menu-' + cocktail.id">On the menu</label>
+                  </div>
+                </template>
+                <div class="row" x-show="!$store.barkeeper.barMode">
 
                   <div class="col-12">
                     <div class="input-group">
@@ -1572,7 +1637,7 @@
                 </div>
                 <div class="row mt-2">
 
-                  <div class="col-4">
+                  <div :class="$store.barkeeper.barMode ? 'col-6' : 'col-4'">
                     <button
                       type="button"
                       class="btn btn-primary w-100"
@@ -1584,7 +1649,7 @@
                     </button>
                   </div>
 
-                  <div class="col-4">
+                  <div class="col-4" x-show="!$store.barkeeper.barMode">
                     <button
                       type="button"
                       class="btn btn-success w-100"
@@ -1597,7 +1662,7 @@
                     </button>
                   </div>
 
-                  <div class="col-4">
+                  <div :class="$store.barkeeper.barMode ? 'col-6' : 'col-4'">
                     <button
                       type="button"
                       class="btn btn-danger w-100"
@@ -1641,7 +1706,7 @@
 
 <!-- Barprogram -->
   <template
-    x-if="$store.barkeeper.data.events.some((e) => e.id === $store.barkeeper.activeTab)">
+    x-if="$store.barkeeper.isEventTab">
     <div class="container p-3 pt-0">
       <section class="my-5">
         <template

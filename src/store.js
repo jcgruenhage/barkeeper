@@ -2,7 +2,7 @@ import Alpine from "alpinejs";
 import * as d3 from "d3";
 import * as math from "mathjs";
 import { SHAKEN_ID, STIRRED_ID } from "./migrate.js";
-import { cheapestOption, purchaseOptions } from "./sizes.js";
+import { cheapestOption, purchaseOptions, unitPrice } from "./sizes.js";
 
 const chartCurrencyFormatDE = d3.formatDefaultLocale({
   thousands: '.',
@@ -32,7 +32,14 @@ export function createStore(spaces = null) {
         },
       ],
       glassTypes: [],
+      // State of a permanent bar, keyed by the ids of cocktails and
+      // ingredients. Only used in bar mode.
+      bar: {
+        cocktails: {},
+      },
       settings: {
+        // 'popup' plans events, 'bar' runs a permanent bar with a menu.
+        mode: 'popup',
         costDistRange: [50, 200],
         costDistMinimaNum: 5,
         costDistMinimaThreshold: 7,
@@ -311,6 +318,46 @@ export function createStore(spaces = null) {
       });
     },
 
+    // Mode
+    get barMode() {
+      return this.data.settings.mode === 'bar';
+    },
+
+    get isCocktailTab() {
+      if (this.barMode) return this.activeTab === 'Menu' || this.activeTab === 'Repertoire';
+      return this.activeTab === 'null' || this.data.events.some((e) => e.id === this.activeTab);
+    },
+
+    get isEventTab() {
+      return !this.barMode && this.data.events.some((e) => e.id === this.activeTab);
+    },
+
+    setMode(mode) {
+      this.data.settings.mode = mode;
+    },
+
+    // Bar
+    barEntry(collection, id) {
+      return this.data.bar?.[collection]?.[id];
+    },
+
+    // Creates the entry if it does not exist yet. Only call from event handlers,
+    // never while rendering.
+    editBarEntry(collection, id) {
+      this.data.bar ??= {};
+      this.data.bar[collection] ??= {};
+      this.data.bar[collection][id] ??= {};
+      return this.data.bar[collection][id];
+    },
+
+    isOnMenu(id) {
+      return this.barEntry('cocktails', id)?.onMenu === true;
+    },
+
+    setOnMenu(id, onMenu) {
+      this.editBarEntry('cocktails', id).onMenu = onMenu;
+    },
+
     // Events
     addEvent(name) {
       this.data.events.push({
@@ -552,11 +599,17 @@ export function createStore(spaces = null) {
     // Cocktails
     removeCocktail(id) {
       this.data.cocktails = this.data.cocktails.filter((e) => e.id !== id);
+      if (this.data.bar?.cocktails) delete this.data.bar.cocktails[id];
     },
 
     addCocktail(name, event = 'null') {
+      const id = self.crypto.randomUUID();
+      if (this.barMode) {
+        event = 'null';
+        if (this.activeTab === 'Menu') this.setOnMenu(id, true);
+      }
       this.data.cocktails.unshift({
-        id: self.crypto.randomUUID(),
+        id: id,
         name: name,
         ingredients: [],
         garnishes: [],
@@ -582,9 +635,14 @@ export function createStore(spaces = null) {
 
       // A deep copy, so that editing the copy does not change the original.
       const copy = JSON.parse(JSON.stringify(cocktail));
+      const copyId = self.crypto.randomUUID();
+      if (this.barMode) {
+        event = cocktail.event;
+        if (this.isOnMenu(id)) this.setOnMenu(copyId, true);
+      }
       this.data.cocktails.unshift({
         ...copy,
-        id: self.crypto.randomUUID(),
+        id: copyId,
         event: event,
       });
     },
@@ -600,7 +658,13 @@ export function createStore(spaces = null) {
     },
 
     getCocktails(searchString = false) {
-      const cocktails = this.data.cocktails.filter((e) => e.event === this.activeTab);
+      let cocktails;
+      if (this.barMode) {
+        const onMenu = this.activeTab === 'Menu';
+        cocktails = this.data.cocktails.filter((e) => this.isOnMenu(e.id) === onMenu);
+      } else {
+        cocktails = this.data.cocktails.filter((e) => e.event === this.activeTab);
+      }
 
       if (searchString !== false) {
         return cocktails.filter((e) => e.name.toLowerCase().includes(searchString.toLowerCase()));
@@ -718,6 +782,12 @@ export function createStore(spaces = null) {
       return {volume: volume, ethanol: ethanol, volumeDiluted: this.getDilutedVolume(volume, ethanol, cocktail.method)};
     },
 
+    // The ice of the open event, or the defaults of a new event where there is
+    // none (the Ideas tab, bar mode).
+    get iceSizes() {
+      return this.getEvent?.barProgram.ice ?? { cubeSize: 25, scoopSize: 150, largeCubeSize: 50 };
+    },
+
     getIceVolumePrep(cocktail_id) {
       const cocktail = this.data.cocktails.find((c) => c.id === cocktail_id);
       if(!cocktail) { return 0; };
@@ -725,15 +795,15 @@ export function createStore(spaces = null) {
       let volume = 0;
 
       // cubes
-      const cubeSize = this.getEvent.barProgram.ice.cubeSize;
+      const cubeSize = this.iceSizes.cubeSize;
       volume += cocktail.cubes * (cubeSize/10)**3;
 
       // large cubes
-      const largeCubeSize = this.getEvent.barProgram.ice.largeCubeSize;
+      const largeCubeSize = this.iceSizes.largeCubeSize;
       volume += cocktail.largeCubes * (largeCubeSize/10)**3;
 
       // crushed
-      const scoopSize = this.getEvent.barProgram.ice.scoopSize;
+      const scoopSize = this.iceSizes.scoopSize;
       const density = 0.917;
       volume += cocktail.crushed * scoopSize / density;
 
@@ -747,15 +817,15 @@ export function createStore(spaces = null) {
       let volume = 0;
 
       // cubes
-      const cubeSize = this.getEvent.barProgram.ice.cubeSize;
+      const cubeSize = this.iceSizes.cubeSize;
       volume += cocktail.cubesServing * (cubeSize/10)**3;
 
       // large cubes
-      const largeCubeSize = this.getEvent.barProgram.ice.largeCubeSize;
+      const largeCubeSize = this.iceSizes.largeCubeSize;
       volume += cocktail.largeCubesServing * (largeCubeSize/10)**3;
 
       // crushed
-      const scoopSize = this.getEvent.barProgram.ice.scoopSize;
+      const scoopSize = this.iceSizes.scoopSize;
       const density = 0.917;
       volume += cocktail.crushedServing * scoopSize / density;
 
@@ -839,6 +909,32 @@ export function createStore(spaces = null) {
         };
       });
       return recipe;
+    },
+
+    // What one serve of a cocktail costs at the lowest price per ml (or piece)
+    // of each ingredient, ignoring that bottles come in whole numbers.
+    // `unpriced` lists the ingredients that have no source.
+    calcServeCost(id) {
+      const cocktail = this.data.cocktails.find((e) => e.id === id);
+      if (!cocktail) { return { cost: 0, unpriced: [] }; };
+
+      const ingredients = JSON.parse(JSON.stringify(cocktail.ingredients.concat(cocktail.garnishes)));
+      const recipe = this.assembleRecipe(ingredients).flat(Infinity);
+
+      let cost = 0;
+      const unpriced = new Set();
+      recipe.forEach((entry) => {
+        const ingredient = this.getIngredient(entry.id);
+        if (!ingredient) { return; };
+        const price = unitPrice(ingredient);
+        if (price === undefined) {
+          unpriced.add(ingredient.name);
+          return;
+        };
+        cost += entry.amount * price;
+      });
+
+      return { cost: cost, unpriced: [...unpriced] };
     },
 
     calcCocktailCost(id, min_n = false, max_n = false) {

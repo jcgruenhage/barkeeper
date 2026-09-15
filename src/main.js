@@ -59,6 +59,7 @@ async function boot() {
   store.data = session.initialView();
   store.data.settings ??= {};
   store.data.settings.darkMode = loadDarkMode();
+  if (store.data.settings.mode === "bar") store.activeTab = "Menu";
 
   Alpine.store("barkeeper", store);
   const live = Alpine.store("barkeeper");

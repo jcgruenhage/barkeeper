@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { cheapestOption, purchaseOptions } from "../src/sizes.js";
+import { cheapestOption, purchaseOptions, unitPrice } from "../src/sizes.js";
 
 const gin = {
   id: "gin",
@@ -40,4 +40,11 @@ test("the cheapest option depends on how much is needed", () => {
   // Sizes of zero are skipped rather than dividing by zero.
   assert.equal(cheapestOption({ sizes: [gin.sizes[2]] }, 100), undefined);
   assert.equal(cheapestOption({ sizes: [] }, 100), undefined);
+});
+
+test("the unit price is the lowest over all sizes and sources", () => {
+  // 18/700 is about 0.0257, 24/1000 is 0.024.
+  assert.equal(unitPrice(gin), 0.024);
+  assert.equal(unitPrice({ sizes: [gin.sizes[2]] }), undefined);
+  assert.equal(unitPrice({ id: "syrup", ingredients: [] }), undefined);
 });
