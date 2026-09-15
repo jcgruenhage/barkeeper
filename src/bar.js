@@ -6,6 +6,7 @@
 // not in a size, like a batch of syrup. An ingredient without an entry is not
 // tracked and never runs out; an entry that adds up to zero means it is out.
 
+import { cheapestOption } from "./sizes.js";
 import { conversionFactor } from "./units.js";
 
 /** How much of an ingredient is in stock, or undefined if it is not tracked. */
@@ -45,6 +46,12 @@ export function stockOf(data) {
  * from stock as they are.
  */
 export function serveNeeds(data, cocktail, stop = () => false) {
+  const entries = [...(cocktail.ingredients ?? []), ...(cocktail.garnishes ?? [])];
+  return recipeNeeds(data, entries, 1, stop);
+}
+
+// What `scale` times the recipe `entries` takes, broken down like serveNeeds().
+function recipeNeeds(data, entries, scale, stop) {
   const ingredients = new Map((data.ingredients ?? []).map((i) => [i.id, i]));
   const table = data.settings?.unitConvTable ?? [];
   const needs = new Map();
@@ -69,9 +76,7 @@ export function serveNeeds(data, cocktail, stop = () => false) {
     }
   };
 
-  for (const entry of [...(cocktail.ingredients ?? []), ...(cocktail.garnishes ?? [])]) {
-    add(entry, 1, new Set());
-  }
+  for (const entry of entries) add(entry, scale, new Set());
   return needs;
 }
 
@@ -99,6 +104,98 @@ export function makeable(data, cocktail) {
     }
   }
   return { count, limiting };
+}
+
+/**
+ * What to buy, and which sub-recipes to make, to restock a permanent bar.
+ *
+ * Each cocktail on the menu has two targets: `solo`, how many serves the stock
+ * should allow if nothing else is made, and `guaranteed`, how many it should
+ * allow while every other cocktail on the menu is made up to its guaranteed
+ * number too. For each ingredient, the stock should cover the most of:
+ *
+ * - the guaranteed numbers of all cocktails together,
+ * - the solo number of any one cocktail,
+ * - its minimum stock.
+ *
+ * Only tracked ingredients are restocked. A tracked sub-recipe that falls
+ * short is made, and what making it takes is added to its ingredients.
+ * Every ingredient is bought in whole units of its cheapest option for the
+ * amount missing.
+ *
+ * Returns `buy`, one entry per ingredient to buy (`option` is undefined if it
+ * has no source), and `make`, one entry per sub-recipe to make, both in the
+ * base unit of the ingredient.
+ */
+export function restock(data) {
+  const ingredients = new Map((data.ingredients ?? []).map((i) => [i.id, i]));
+  const stock = stockOf(data);
+  const tracked = (id) => stock(id) !== undefined;
+
+  const target = new Map();
+  const raise = (id, amount) => target.set(id, Math.max(target.get(id) ?? 0, amount));
+
+  const guaranteed = new Map();
+  for (const cocktail of data.cocktails ?? []) {
+    const entry = data.bar?.cocktails?.[cocktail.id];
+    if (entry?.onMenu !== true) continue;
+    const guaranteedServes = Math.max(0, finite(entry.guaranteed));
+    const soloServes = Math.max(finite(entry.solo), guaranteedServes);
+    if (soloServes === 0) continue;
+    for (const [id, need] of serveNeeds(data, cocktail, tracked)) {
+      guaranteed.set(id, (guaranteed.get(id) ?? 0) + guaranteedServes * need);
+      raise(id, soloServes * need);
+    }
+  }
+  for (const [id, amount] of guaranteed) raise(id, amount);
+  for (const [id, amount] of Object.entries(data.bar?.par ?? {})) raise(id, finite(amount));
+
+  const buy = [];
+  const make = [];
+  // Sub-recipes before what they are made of, so that making one adds to
+  // its ingredients before they are looked at.
+  for (const id of recipeOrder(ingredients)) {
+    const ingredient = ingredients.get(id);
+    const inStock = stock(id);
+    if (inStock === undefined || !target.has(id)) continue;
+    const missing = target.get(id) - inStock;
+    if (!(missing > 1e-9)) continue;
+
+    const recipe = ingredient.ingredients ?? [];
+    if (recipe.length > 0 && finite(ingredient.yield) > 0) {
+      make.push({ id, target: target.get(id), stock: inStock, amount: missing });
+      const needs = recipeNeeds(data, recipe, missing / finite(ingredient.yield), tracked);
+      for (const [sub, amount] of needs) target.set(sub, (target.get(sub) ?? 0) + amount);
+      continue;
+    }
+
+    const option = cheapestOption(ingredient, missing);
+    const num = option ? Math.ceil(missing / option.size - 1e-9) : 0;
+    buy.push({
+      id,
+      target: target.get(id),
+      stock: inStock,
+      missing,
+      option,
+      num,
+      cost: option ? num * option.price : 0,
+    });
+  }
+  return { buy, make };
+}
+
+// Every ingredient id, each sub-recipe before the ingredients of its recipe.
+function recipeOrder(ingredients) {
+  const order = [];
+  const seen = new Set();
+  const visit = (id) => {
+    if (seen.has(id) || !ingredients.has(id)) return;
+    seen.add(id);
+    for (const sub of ingredients.get(id).ingredients ?? []) visit(sub.id);
+    order.push(id);
+  };
+  for (const id of ingredients.keys()) visit(id);
+  return order.reverse();
 }
 
 function finite(value) {

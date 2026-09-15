@@ -96,7 +96,7 @@ async function openBar(data) {
 
 async function openTab(page, name) {
   if (name === "settings") await page.locator("#header .nav-link").last().click();
-  else await page.locator("#header .nav-link", { hasText: name }).click();
+  else await page.locator("#header .nav-link", { hasText: new RegExp(`^${name}$`) }).click();
 }
 
 async function tabNames(page) {
@@ -123,7 +123,7 @@ test("drinks go on and off the menu of a permanent bar", { timeout: 5 * 60_000 }
 
   await openTab(page, "settings");
   await page.locator("#bar-mode-bar").check();
-  assert.deepEqual(await tabNames(page), ["Menu", "Repertoire", "Stock", "Ingredients"]);
+  assert.deepEqual(await tabNames(page), ["Menu", "Repertoire", "Stock", "Restock", "Ingredients"]);
 
   await openTab(page, "Repertoire");
   assert.deepEqual((await cocktailNames(page)).sort(), ["Closing Argument", "Last Word"]);
@@ -244,5 +244,44 @@ test("the stock decides how many of each cocktail can be made", { timeout: 5 * 6
   const lastWord = await card(page, "Last Word");
   assert.equal(await lastWord.locator(".makeable-count").innerText(), "8");
   assert.equal(await lastWord.locator(".makeable-limiting").innerText(), "Green Chartreuse runs out first.");
+  assert.deepEqual(page.errors, []);
+});
+
+test("restocking buys for the larger of solo and all guarantees", { timeout: 5 * 60_000 }, async () => {
+  const data = barMode(homeBar());
+  data.bar = {
+    cocktails: { "last-word": { onMenu: true }, "closing-argument": { onMenu: true } },
+    stock: { gin: {}, mezcal: {}, chartreuse: {}, maraschino: {}, lime: {} },
+    par: {},
+  };
+  const page = await openBar(data);
+  await openTab(page, "Restock");
+  await eventually(() => page.locator(".restock-empty").isVisible(), true);
+
+  await openTab(page, "Menu");
+  for (const name of ["Last Word", "Closing Argument"]) {
+    const drink = await card(page, name);
+    await setInput(drink.locator(".target-solo"), 10);
+    await setInput(drink.locator(".target-guaranteed"), 5);
+  }
+
+  await openTab(page, "Restock");
+  const row = (id) => page.locator(`.restock-buy tr[data-ingredient='${id}']`);
+  // 225 ml of everything: one 700 ml bottle each, the cheapest for 225 ml.
+  await eventually(() => row("chartreuse").locator(".restock-num").innerText(), "1");
+  for (const id of ["gin", "mezcal", "maraschino"]) {
+    assert.equal(await row(id).locator(".restock-num").innerText(), "1");
+  }
+  assert.match(await row("gin").innerText(), /225,00/);
+  assert.match(await row("lime").innerText(), /no source/);
+  // Currencies are formatted with a non-breaking space.
+  const total = async () => (await page.locator(".restock-total").innerText()).replace(/\s/g, " ");
+  assert.equal(await total(), "135,00 €");
+
+  await openTab(page, "Stock");
+  await setInput(page.locator(".stock-item[data-ingredient='chartreuse'] .stock-count[data-size='700']"), 0.5);
+  await openTab(page, "Restock");
+  await eventually(() => row("chartreuse").count(), 0);
+  await eventually(total, "90,00 €");
   assert.deepEqual(page.errors, []);
 });

@@ -3,7 +3,7 @@ import * as d3 from "d3";
 import * as math from "mathjs";
 import { SHAKEN_ID, STIRRED_ID } from "./migrate.js";
 import { cheapestOption, purchaseOptions, unitPrice } from "./sizes.js";
-import { foldSizeIntoLoose, makeable, stockAmount } from "./bar.js";
+import { foldSizeIntoLoose, makeable, restock, stockAmount } from "./bar.js";
 import { conversionFactor, ingredientUnits, standardUnits } from "./units.js";
 
 const chartCurrencyFormatDE = d3.formatDefaultLocale({
@@ -142,7 +142,7 @@ export function createStore(spaces = null) {
       this.download(
         'data:text/csv;charset=utf-8,',
         encodeURIComponent(csv),
-        this.getEvent.name + '_shopping_list.csv'
+        (this.getEvent?.name ?? this.space.name ?? 'barkeeper') + '_shopping_list.csv'
       );
     },
 
@@ -360,6 +360,47 @@ export function createStore(spaces = null) {
 
     setOnMenu(id, onMenu) {
       this.editBarEntry('cocktails', id).onMenu = onMenu;
+    },
+
+    // Restock targets of a cocktail: 'solo' serves if nothing else is made,
+    // 'guaranteed' serves alongside the rest of the menu.
+    getTarget(id, kind) {
+      return this.barEntry('cocktails', id)?.[kind];
+    },
+
+    setTarget(id, kind, value) {
+      const entry = this.editBarEntry('cocktails', id);
+      if (value === '' || !Number.isFinite(Number(value))) delete entry[kind];
+      else entry[kind] = Number(value);
+    },
+
+    // What to buy and make to reach the targets, in the shape of the popup
+    // shopping list, so that it exports the same way.
+    get restockList() {
+      const { buy, make } = restock(this.data);
+      return {
+        buy: buy
+          .map((item) => {
+            const ingredient = this.getIngredient(item.id);
+            return {
+              ...item,
+              name:     ingredient.name,
+              unit:     ingredient.baseUnit,
+              comment:  ingredient.notes,
+              amount:   item.missing,
+              price:    item.option?.price ?? 0,
+              shopLink: item.option?.shopLink ?? '',
+              // The CSV export leaves out sizes of items that have none.
+              ...(item.option ? { size: item.option.size } : {}),
+            };
+          })
+          .toSorted((a, b) => a.shopLink.localeCompare(b.shopLink) || a.name.localeCompare(b.name)),
+        make: make.map((item) => ({
+          ...item,
+          name: this.getIngredient(item.id).name,
+          unit: this.getIngredient(item.id).baseUnit,
+        })),
+      };
     },
 
     // Stock, in the base unit of each ingredient. Undefined if not tracked.
