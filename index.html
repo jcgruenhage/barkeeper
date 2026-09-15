@@ -515,6 +515,27 @@
       font-size: 1.25rem;
       vertical-align: middle;
     }
+
+    /* The import review covers the app: it is one decision, taken in one go. */
+    #import-review {
+      position: fixed;
+      inset: 0;
+      z-index: 1050;
+      overflow-y: auto;
+      background: var(--bs-body-bg);
+    }
+
+    #import-review .import-name {
+      min-width: 12rem;
+    }
+
+    #import-review .import-decision {
+      max-width: 22rem;
+    }
+
+    #import-review tr.needs-review > td:first-child {
+      border-left: 0.25rem solid var(--bs-warning);
+    }
   </style>
 
 </head>
@@ -604,6 +625,212 @@
         <button type="button" class="btn-close float-end" @click="$store.barkeeper.space.notice = null"></button>
       </div>
     </div>
+
+<!-- Import review -->
+  <template x-if="$store.barkeeper.importer.open">
+    <div id="import-review" class="d-print-none">
+      <div class="container p-3">
+
+        <div class="d-flex align-items-center gap-2 mb-2">
+          <h2 class="flex-grow-1 mb-0">Import recipes</h2>
+          <button type="button" class="btn-close" aria-label="Close" @click="$store.barkeeper.closeImporter()"></button>
+        </div>
+        <p class="text-body-secondary">
+          Adding <code x-text="$store.barkeeper.importer.fileName"></code> to
+          <span x-text="$store.barkeeper.space.name"></span>. Nothing that is already in the space is
+          changed or removed.
+        </p>
+
+        <template x-if="$store.barkeeper.importer.error">
+          <div class="alert alert-danger" role="alert">
+            <span x-text="$store.barkeeper.importer.error"></span>
+            <button type="button" class="btn btn-outline-secondary btn-sm ms-2" @click="$store.barkeeper.closeImporter()">Close</button>
+          </div>
+        </template>
+
+<!-- What the import did -->
+        <template x-if="$store.barkeeper.importer.result">
+          <div>
+            <div class="alert alert-success" role="status">
+              <strong>
+                <span x-text="$store.barkeeper.importer.result.cocktails.length"></span>
+                <span x-text="$store.barkeeper.importer.result.cocktails.length === 1 ? 'cocktail' : 'cocktails'"></span>
+                imported.
+              </strong>
+              <div class="small mt-1">
+                <span x-text="$store.barkeeper.importer.result.counts.ingredients.create"></span> ingredients added,
+                <span x-text="$store.barkeeper.importer.result.counts.ingredients.match"></span> matched to ones
+                already here.
+              </div>
+            </div>
+
+            <template x-if="$store.barkeeper.importer.result.warnings.length">
+              <div class="alert alert-warning" role="alert">
+                <ul class="mb-0">
+                  <template x-for="warning in $store.barkeeper.importer.result.warnings" :key="warning">
+                    <li x-text="warning"></li>
+                  </template>
+                </ul>
+              </div>
+            </template>
+
+            <ul class="list-group mb-3">
+              <template x-for="cocktail in $store.barkeeper.importer.result.cocktails" :key="cocktail.id">
+                <li class="list-group-item" x-text="cocktail.name"></li>
+              </template>
+            </ul>
+
+            <button type="button" class="btn btn-primary mb-5" @click="$store.barkeeper.closeImporter()">Done</button>
+          </div>
+        </template>
+
+<!-- What the import would do -->
+        <template x-if="$store.barkeeper.importer.plan">
+          <div>
+
+            <div class="card mb-3">
+              <div class="card-body">
+                <template x-if="!$store.barkeeper.barMode">
+                  <div>
+                    <label class="form-label" for="import-event">Where the cocktails go</label>
+                    <select id="import-event" class="form-select" x-model="$store.barkeeper.importer.event">
+                      <option value="null">Ideas</option>
+                      <template x-for="event in $store.barkeeper.data.events" :key="event.id">
+                        <option :value="event.id" x-text="event.name"></option>
+                      </template>
+                    </select>
+                  </div>
+                </template>
+                <template x-if="$store.barkeeper.barMode">
+                  <div>
+                    <p class="mb-2 text-body-secondary">The cocktails go into the repertoire.</p>
+                    <div class="form-check">
+                      <input
+                        class="form-check-input"
+                        type="checkbox"
+                        id="import-on-menu"
+                        x-model="$store.barkeeper.importer.onMenu">
+                      <label class="form-check-label" for="import-on-menu">Put them on the menu as well</label>
+                    </div>
+                  </div>
+                </template>
+              </div>
+            </div>
+
+            <template x-if="$store.barkeeper.importReviewCount > 0">
+              <div class="alert alert-warning" role="alert">
+                <span x-text="$store.barkeeper.importReviewCount"></span>
+                of these need a look: it is not clear whether they are something the space already has.
+                They are listed first, marked on the left.
+              </div>
+            </template>
+
+            <template x-if="$store.barkeeper.importer.plan.problems.length">
+              <div class="alert alert-secondary" role="alert">
+                <ul class="mb-0">
+                  <template x-for="problem in $store.barkeeper.importer.plan.problems" :key="problem">
+                    <li x-text="problem"></li>
+                  </template>
+                </ul>
+              </div>
+            </template>
+
+            <div class="card mb-3" data-section="cocktails" x-show="$store.barkeeper.importer.plan.cocktails.length">
+              <div class="card-header card-title">
+                Cocktails
+                <span class="badge text-bg-secondary" x-text="$store.barkeeper.importer.plan.cocktails.length"></span>
+              </div>
+              <div class="table-responsive">
+                <table class="table table-sm align-middle mb-0">
+                  <tbody>
+                    <template x-for="entry in $store.barkeeper.importEntries('cocktails')" :key="entry.key">
+                      <tr :class="{ 'needs-review': entry.needsReview }">
+                        <td class="import-name">
+                          <span class="import-record-name" x-text="entry.name"></span>
+                          <template x-if="entry.matchedBy">
+                            <span class="badge text-bg-warning ms-1">already in this space</span>
+                          </template>
+                        </td>
+                        <td class="text-body-secondary small" x-text="$store.barkeeper.importRecipeSummary(entry)"></td>
+                        <td class="import-decision">
+                          <select
+                            class="form-select form-select-sm"
+                            @change="entry.decision = $event.target.value; entry.needsReview = false">
+                            <option value="create" :selected="entry.decision === 'create'">import</option>
+                            <option value="skip" :selected="entry.decision === 'skip'">leave out</option>
+                          </select>
+                        </td>
+                      </tr>
+                    </template>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            <template x-for="section in [
+                { kind: 'ingredients', title: 'Ingredients' },
+                { kind: 'prepMethods', title: 'Prep methods' },
+                { kind: 'glassTypes', title: 'Glasses' }
+              ]" :key="section.kind">
+              <div class="card mb-3" :data-section="section.kind" x-show="$store.barkeeper.importer.plan[section.kind].length">
+                <div class="card-header card-title">
+                  <span x-text="section.title"></span>
+                  <span class="badge text-bg-secondary" x-text="$store.barkeeper.importer.plan[section.kind].length"></span>
+                </div>
+                <div class="table-responsive">
+                  <table class="table table-sm align-middle mb-0">
+                    <tbody>
+                      <template x-for="entry in $store.barkeeper.importEntries(section.kind)" :key="entry.key">
+                        <tr :class="{ 'needs-review': entry.needsReview }">
+                          <td class="import-name">
+                            <span class="import-record-name" x-text="entry.incomingName || entry.name"></span>
+                            <template x-if="entry.ambiguous">
+                              <span class="badge text-bg-warning ms-1">several of this name</span>
+                            </template>
+                          </td>
+                          <td class="text-body-secondary small" x-text="entry.usedBy.join(', ')"></td>
+                          <td class="import-decision">
+                            <select
+                              class="form-select form-select-sm"
+                              @change="$store.barkeeper.setImportDecision(entry, $event.target.value)">
+                              <option
+                                value="create"
+                                :selected="entry.decision === 'create'"
+                                x-text="'add as new: ' + (entry.incomingName || entry.name)"></option>
+                              <template x-for="option in $store.barkeeper.importMatchOptions(entry)" :key="option.id">
+                                <option
+                                  :value="option.id"
+                                  :selected="entry.decision === 'match' && String(entry.targetId) === String(option.id)"
+                                  x-text="'use ' + option.name + (option.suggested ? ' — looks close' : '')"></option>
+                              </template>
+                              <option value="skip" :selected="entry.decision === 'skip'">leave out</option>
+                            </select>
+                          </td>
+                        </tr>
+                      </template>
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </template>
+
+            <div class="d-flex gap-2 mb-5">
+              <button
+                type="button"
+                class="btn btn-primary import-run"
+                :disabled="!$store.barkeeper.importWouldCreate"
+                @click="$store.barkeeper.runImport()">
+                Import
+              </button>
+              <button type="button" class="btn btn-outline-secondary" @click="$store.barkeeper.closeImporter()">Cancel</button>
+            </div>
+
+          </div>
+        </template>
+
+      </div>
+    </div>
+  </template>
 
 <!-- Settings -->
   <template x-if="$store.barkeeper.activeTab === '⚙'">
@@ -748,6 +975,13 @@
             <path d="M14 14V4.5L9.5 0H4a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2M9.5 3A1.5 1.5 0 0 0 11 4.5h2V14a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V2a1 1 0 0 1 1-1h5.5z"/>
           </svg>
           import as new space
+        </button>
+        <button type="button" class="btn btn-primary import-extend" @click="$store.barkeeper.importRecipes()">
+          <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" class="bi bi-file-earmark-plus" viewBox="0 0 16 16">
+            <path d="M8 6.5a.5.5 0 0 1 .5.5V8H10a.5.5 0 0 1 0 1H8.5v1.5a.5.5 0 0 1-1 0V9H6a.5.5 0 0 1 0-1h1.5V7a.5.5 0 0 1 .5-.5"/>
+            <path d="M14 4.5V14a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V2a2 2 0 0 1 2-2h5.5zm-3 0A1.5 1.5 0 0 1 9.5 3V1H4a1 1 0 0 0-1 1v12a1 1 0 0 0 1 1h8a1 1 0 0 0 1-1V4.5z"/>
+          </svg>
+          import extending this space
         </button>
         <button type="button" class="btn btn-outline-danger" @click="$store.barkeeper.import('replace')">
           <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" class="bi bi-file-earmark-arrow-up" viewBox="0 0 16 16">

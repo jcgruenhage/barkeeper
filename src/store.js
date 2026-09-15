@@ -1,10 +1,17 @@
 import Alpine from "alpinejs";
 import * as d3 from "d3";
 import * as math from "mathjs";
-import { SHAKEN_ID, STIRRED_ID } from "./migrate.js";
+import {
+  defaultCocktail,
+  defaultGlassType,
+  defaultIngredient,
+  defaultPrepMethod,
+  defaultPrepMethods,
+} from "./records.js";
 import { cheapestOption, purchaseOptions, unitPrice } from "./sizes.js";
 import { foldSizeIntoLoose, makeable, restock, stockAmount } from "./bar.js";
 import { conversionFactor, ingredientUnits, standardUnits } from "./units.js";
+import { applyImport, parseImport, planCounts, planImport, reviewNeeded } from "./import.js";
 
 const chartCurrencyFormatDE = d3.formatDefaultLocale({
   thousands: '.',
@@ -21,18 +28,7 @@ export function createStore(spaces = null) {
       cocktails: [],
       ingredients: [],
       events: [],
-      prepMethods: [
-        {
-          id: STIRRED_ID,
-          name: 'stirred',
-          dilutionFormula: '1 + (-1.21 * abv^2 + 1.246 * abv + 0.145)',
-        },
-        {
-          id: SHAKEN_ID,
-          name: 'shaken',
-          dilutionFormula: '1 + (-1.567 * abv^2 + 1.742 * abv + 0.0203)',
-        },
-      ],
+      prepMethods: defaultPrepMethods(),
       glassTypes: [],
       // State of a permanent bar, keyed by the ids of cocktails and
       // ingredients. Only used in bar mode.
@@ -71,6 +67,18 @@ export function createStore(spaces = null) {
     },
     device: {
       name: '',
+    },
+
+    // The import under review. `plan` is what planImport() worked out, which
+    // the review screen changes before runImport() carries it out.
+    importer: {
+      open: false,
+      fileName: '',
+      plan: null,
+      event: 'null',
+      onMenu: false,
+      error: null,
+      result: null,
     },
     charts: {},
     barChart: null,
@@ -229,6 +237,118 @@ export function createStore(spaces = null) {
         };
         fr.readAsText(file);
       };
+    },
+
+    // Recipe import
+    //
+    // Unlike import(), this adds to the open space instead of replacing it.
+    // The file is read and planned here; the review screen settles the matches
+    // and runImport() carries the plan out.
+    importRecipes() {
+      const fileInput = document.getElementById('import');
+      fileInput.value = '';
+      fileInput.click();
+
+      fileInput.onchange = () => {
+        const file = fileInput.files.item(0);
+        if (!file) return;
+        const fr = new FileReader();
+        fr.onload = (e) => {
+          this.importer.fileName = file.name;
+          this.importer.result = null;
+          this.importer.error = null;
+          this.importer.plan = null;
+          this.importer.onMenu = false;
+          this.importer.event = this.isEventTab ? this.activeTab : 'null';
+          try {
+            this.importer.plan = planImport(parseImport(e.target.result), Alpine.raw(this.data));
+          } catch (error) {
+            this.importer.error = error.message;
+          }
+          this.importer.open = true;
+        };
+        fr.readAsText(file);
+      };
+    },
+
+    // What needs a decision first, then by name.
+    importEntries(kind) {
+      const entries = this.importer.plan?.[kind] ?? [];
+      return [...entries].sort(
+        (a, b) =>
+          (b.needsReview ? 1 : 0) - (a.needsReview ? 1 : 0) ||
+          String(a.name).localeCompare(String(b.name))
+      );
+    },
+
+    // The records an entry could be matched to, the ones that resemble it first.
+    importMatchOptions(entry) {
+      const suggested = (entry.candidates ?? []).map((c) => ({ id: c.id, name: c.name, suggested: true }));
+      const taken = new Set(suggested.map((c) => String(c.id)));
+      const rest = (this.data[entry.kind] ?? [])
+        .filter((record) => !taken.has(String(record.id)))
+        .map((record) => ({ id: record.id, name: record.name, suggested: false }))
+        .sort((a, b) => String(a.name).localeCompare(String(b.name)));
+      return [...suggested, ...rest];
+    },
+
+    // How much of a cocktail the file brings, for the review screen.
+    importRecipeSummary(entry) {
+      const count = (rows) => (Array.isArray(rows) ? rows.length : 0);
+      const parts = [];
+      const ingredients = count(entry.incoming?.ingredients);
+      const garnishes = count(entry.incoming?.garnishes);
+      if (ingredients) parts.push(ingredients + (ingredients === 1 ? ' ingredient' : ' ingredients'));
+      if (garnishes) parts.push(garnishes + (garnishes === 1 ? ' garnish' : ' garnishes'));
+      return parts.join(', ');
+    },
+
+    importDecisionValue(entry) {
+      return entry.decision === 'match' ? String(entry.targetId) : entry.decision;
+    },
+
+    // `value` is 'create', 'skip', or the id of a record to use instead.
+    setImportDecision(entry, value) {
+      if (value === 'create' || value === 'skip') {
+        entry.decision = value;
+        entry.targetId = null;
+      } else {
+        const record = (this.data[entry.kind] ?? []).find((r) => String(r.id) === String(value));
+        entry.decision = 'match';
+        // The record's own id, so that a space with numeric ids keeps them.
+        entry.targetId = record ? record.id : value;
+      }
+      entry.needsReview = false;
+    },
+
+    get importReviewCount() {
+      return this.importer.plan ? reviewNeeded(Alpine.raw(this.importer.plan)).length : 0;
+    },
+
+    get importCounts() {
+      return this.importer.plan ? planCounts(Alpine.raw(this.importer.plan)) : null;
+    },
+
+    // Whether carrying the plan out would actually add anything.
+    get importWouldCreate() {
+      const counts = this.importCounts;
+      return counts ? Object.values(counts).some((kind) => kind.create > 0) : false;
+    },
+
+    runImport() {
+      if (!this.importer.plan) return;
+      this.importer.result = applyImport(this.data, Alpine.raw(this.importer.plan), {
+        event: this.importer.event,
+        onMenu: this.importer.onMenu,
+      });
+      this.importer.plan = null;
+    },
+
+    closeImporter() {
+      this.importer.open = false;
+      this.importer.plan = null;
+      this.importer.result = null;
+      this.importer.error = null;
     },
 
     // Spaces
@@ -575,11 +695,7 @@ export function createStore(spaces = null) {
 
     // Prep Methods
     addPrepMethod(method_name) {
-      this.data.prepMethods.push({
-        id: self.crypto.randomUUID(),
-        name: method_name,
-        dilutionFormula: '1',
-      });
+      this.data.prepMethods.push(defaultPrepMethod(method_name));
     },
 
     removePrepMethod(method) {
@@ -598,31 +714,12 @@ export function createStore(spaces = null) {
     },
 
     addGlassType(name) {
-      this.data.glassTypes.push({
-        id: self.crypto.randomUUID(),
-        name: name,
-        volume: 0
-      });
+      this.data.glassTypes.push(defaultGlassType(name));
     },
 
     // Ingredients
     addIngredient(name) {
-      this.data.ingredients.unshift({
-        id: self.crypto.randomUUID(),
-        name: name,
-        baseUnit: 'ml',
-        units: [],
-        ingredients: [],
-        yield: 0,
-        sizes: [],
-        allergens: [],
-        nonVeganIngredients: [],
-        notes: '',
-        safetyFactor: 0.1,
-        abv: 0,
-        color: '#e9ecef',
-        hideInShoppingList: false
-      });
+      this.data.ingredients.unshift(defaultIngredient(name));
     },
 
     removeIngredient(id) {
@@ -708,30 +805,10 @@ export function createStore(spaces = null) {
     },
 
     addCocktail(name, event = 'null') {
-      const id = self.crypto.randomUUID();
-      if (this.barMode) {
-        event = 'null';
-        if (this.activeTab === 'Menu') this.setOnMenu(id, true);
-      }
-      this.data.cocktails.unshift({
-        id: id,
-        name: name,
-        ingredients: [],
-        garnishes: [],
-        notes: '',
-        cubes: 0,
-        crushed: 0,
-        largeCubes: 0,
-        cubesServing: 0,
-        crushedServing: 0,
-        largeCubesServing: 0,
-        method: undefined,
-        glass: undefined,
-        event: event,
-        numToPrep: 0,
-        price: 0,
-        flavorCues: [],
-      });
+      if (this.barMode) event = 'null';
+      const cocktail = defaultCocktail(name, event);
+      if (this.barMode && this.activeTab === 'Menu') this.setOnMenu(cocktail.id, true);
+      this.data.cocktails.unshift(cocktail);
     },
 
     copyCocktail(id, event = 'null') {
