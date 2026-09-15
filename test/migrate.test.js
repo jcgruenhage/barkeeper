@@ -82,3 +82,41 @@ test("duplicate sizes and sources are merged", () => {
     { id: "s700", size: 700, sources: [{ id: "a", price: 1 }, { id: "b", price: 2 }] },
   ]);
 });
+
+test("gives legacy glasses derived uuids and repoints the cocktails", () => {
+  const data = {
+    glassTypes: [
+      { id: 1, name: "Coupe", volume: 200 },
+      { id: 2, name: "Tumbler", volume: 300 },
+      { id: "fb9acfbb-2169-4394-98d7-626efc05d9f4", name: "Tumbler", volume: 0 },
+    ],
+    cocktails: [
+      { id: "c1", name: "Bramble", glass: 2 },
+      { id: "c2", name: "Daiquiri", glass: 1 },
+      { id: "c3", name: "Negroni", glass: "fb9acfbb-2169-4394-98d7-626efc05d9f4" },
+      { id: "c4", name: "Sour", glass: undefined },
+    ],
+  };
+  migrateData(data);
+
+  const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+  for (const glass of data.glassTypes) assert.match(glass.id, uuid);
+  assert.equal(data.glassTypes[2].id, "fb9acfbb-2169-4394-98d7-626efc05d9f4");
+  assert.equal(data.cocktails[0].glass, data.glassTypes[1].id);
+  assert.equal(data.cocktails[1].glass, data.glassTypes[0].id);
+  assert.equal(data.cocktails[2].glass, "fb9acfbb-2169-4394-98d7-626efc05d9f4");
+  assert.equal(data.cocktails[3].glass, undefined);
+  // Two glasses of the same name stay two glasses, with ids of their own.
+  assert.notEqual(data.glassTypes[1].id, data.glassTypes[2].id);
+});
+
+test("migrating glasses twice is the same as migrating them once", () => {
+  const data = {
+    glassTypes: [{ id: 1, name: "Coupe", volume: 200 }],
+    cocktails: [{ id: "c1", glass: 1 }],
+  };
+  migrateData(data);
+  const once = JSON.stringify(data);
+  migrateData(data);
+  assert.equal(JSON.stringify(data), once);
+});

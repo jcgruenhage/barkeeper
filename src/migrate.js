@@ -30,6 +30,29 @@ export function derivedId(...parts) {
   return [hex.slice(0, 8), hex.slice(8, 12), hex.slice(12, 16), hex.slice(16, 20), hex.slice(20)].join("-");
 }
 
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/**
+ * Glasses used to be created with small integer ids, and cocktails point at
+ * them by id. Records are matched across spaces by id, so the legacy ones get
+ * derived ids and the cocktails are repointed at them.
+ */
+function migrateGlassIds(data) {
+  const renamed = new Map();
+  for (const glass of data?.glassTypes ?? []) {
+    const id = glass?.id;
+    if (typeof id === "string" && UUID.test(id)) continue;
+    const fresh = derivedId("glass", id === undefined || id === null || id === "" ? glass?.name : String(id));
+    renamed.set(String(id), fresh);
+    glass.id = fresh;
+  }
+  if (renamed.size === 0) return;
+  for (const cocktail of data?.cocktails ?? []) {
+    const fresh = renamed.get(String(cocktail?.glass));
+    if (fresh !== undefined) cocktail.glass = fresh;
+  }
+}
+
 function uniqueById(records) {
   const byId = new Map();
   for (const record of records) {
@@ -91,5 +114,6 @@ export function migrateData(data) {
     }
   }
   for (const ingredient of data?.ingredients ?? []) migrateSizes(ingredient);
+  migrateGlassIds(data);
   return data;
 }
